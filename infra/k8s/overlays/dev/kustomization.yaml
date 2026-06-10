@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: observatory-dev
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - environment=dev
+      - mongodb_db=observatory_dev
+      - s3_endpoint=<S3_ENDPOINT>
+      - s3_bucket=observatory-dev
+
+patches:
+  - target:
+      kind: Ingress
+      name: observatory
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: dev.observatory.services
+
+images:
+  - name: ghcr.io/observatoryservices/observatory-services-api
+    newTag: dev
+  - name: ghcr.io/observatoryservices/observatory-services-release-proxy
+    newTag: dev
+  - name: ghcr.io/observatoryservices/observatory-services-frontend
+    newTag: dev

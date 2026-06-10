@@ -1,0 +1,41 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: observatory
+spec:
+  # TLS is terminated by Cloudflare at the edge and tunneled to the cluster
+  # via cloudflared. The ingress only speaks HTTP internally.
+  # When the VPS moves to colocation with a public IP, add a tls: block here
+  # referencing the cloudflare-origin-tls secret, and switch Cloudflare to
+  # Full (strict) SSL mode. See infra/cloudflare/README.md.
+  #
+  # MicroK8s ingress addon ships Traefik. The `public` IngressClass is
+  # registered by Traefik. If you need request-body size limits or similar,
+  # add a Traefik Middleware (traefik.io/v1alpha1) rather than nginx
+  # annotations.
+  ingressClassName: public
+  rules:
+    - host: HOST_PLACEHOLDER
+      http:
+        paths:
+          - path: /api/
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
+          - path: /releases/
+            pathType: Prefix
+            backend:
+              service:
+                name: release-proxy
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

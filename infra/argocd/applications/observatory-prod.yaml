@@ -1,0 +1,22 @@
+# Prod requires manual sync — automated promotion is gated by a human apply.
+# Flip syncPolicy.automated on later if you want hands-off prod rollouts.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observatory-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: observatory
+  source:
+    repoURL: https://github.com/ObservatoryServices/ObservatoryServices.git
+    targetRevision: main
+    path: infra/k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observatory-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

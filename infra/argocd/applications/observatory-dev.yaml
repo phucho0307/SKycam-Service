@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observatory-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: observatory
+  source:
+    repoURL: https://github.com/ObservatoryServices/ObservatoryServices.git
+    targetRevision: dev
+    path: infra/k8s/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observatory-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

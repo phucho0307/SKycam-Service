@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: observatory
+  namespace: argocd
+spec:
+  description: Observatory Services platform — environments + supporting infra
+  sourceRepos:
+    - https://github.com/ObservatoryServices/ObservatoryServices.git
+  destinations:
+    - namespace: observatory-dev
+      server: https://kubernetes.default.svc
+    - namespace: observatory-release
+      server: https://kubernetes.default.svc
+    - namespace: observatory-prod
+      server: https://kubernetes.default.svc
+    - namespace: cloudflare-tunnel
+      server: https://kubernetes.default.svc
+    - namespace: ingress
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

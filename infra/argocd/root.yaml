@@ -1,0 +1,27 @@
+# App-of-apps: this is the single Application you kubectl apply during bootstrap.
+# It tracks infra/argocd/applications/, so adding a new env or component is just
+# committing a new Application YAML there.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ObservatoryServices/ObservatoryServices.git
+    targetRevision: main
+    path: infra/argocd/applications
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

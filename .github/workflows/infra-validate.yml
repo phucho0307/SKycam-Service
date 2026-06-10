@@ -1,0 +1,25 @@
+name: infra-validate
+
+on:
+  push:
+    branches: [main, release, dev]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-validate.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-validate.yml"
+
+jobs:
+  kustomize:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        overlay: [dev, release, prod]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build overlay
+        run: kubectl kustomize infra/k8s/overlays/${{ matrix.overlay }} > /tmp/${{ matrix.overlay }}.yaml
+      - name: Show
+        run: head -200 /tmp/${{ matrix.overlay }}.yaml
