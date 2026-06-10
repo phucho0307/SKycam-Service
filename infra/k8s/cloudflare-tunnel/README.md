@@ -27,8 +27,8 @@ Outbound-only TLS-terminated path from Cloudflare's edge to the cluster. Require
      --from-literal=token='eyJhIjoi...' \
      --dry-run=client -o yaml \
    | kubeseal --format=yaml \
-     --controller-namespace=sealed-secrets \
-     --controller-name=sealed-secrets \
+     --controller-namespace=kube-system \
+     --controller-name=sealed-secrets-controller \
    > infra/k8s/cloudflare-tunnel/cloudflared-token.sealed.yaml
    ```
 

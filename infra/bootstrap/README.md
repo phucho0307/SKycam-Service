@@ -40,9 +40,7 @@ kubectl -n ingress get ds          # nginx-ingress-microk8s-controller
 Lets you commit encrypted secrets to git that only this cluster can decrypt.
 
 ```bash
-kubectl create namespace sealed-secrets
-kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml \
-  -n sealed-secrets
+kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml
 
 # kubeseal CLI on your laptop (not the VPS):
 #   macOS:   brew install kubeseal
@@ -53,7 +51,7 @@ kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/latest/
 Fetch the public cert (used to encrypt secrets offline):
 
 ```bash
-kubeseal --controller-namespace=sealed-secrets --controller-name=sealed-secrets \
+kubeseal --controller-namespace=kube-system --controller-name=sealed-secrets-controller \
   --fetch-cert > sealed-secrets-pub.pem
 ```
 
@@ -107,6 +105,7 @@ kubectl apply -f infra/argocd/root.yaml
 ```
 
 That's it. ArgoCD now reconciles everything else:
+
 - `cloudflare-tunnel` Application → installs cloudflared (once the sealed token is committed; see `infra/k8s/cloudflare-tunnel/README.md`)
 - `observatory-dev` / `observatory-release` → auto-sync on branch pushes
 - `observatory-prod` → manual sync (sync button in ArgoCD UI or `argocd app sync observatory-prod`)
@@ -114,11 +113,13 @@ That's it. ArgoCD now reconciles everything else:
 ## 5. Commit the sealed secrets
 
 For each environment namespace you need:
+
 - `mongodb-credentials` (StatefulSet init user/pass)
 - `api-secrets` (mongodb_uri)
 - `release-proxy-secrets` (S3 + GitHub App — Phase 1c)
 
 For the tunnel namespace you need:
+
 - `cloudflared-token` (see `infra/k8s/cloudflare-tunnel/README.md`)
 
 Example for `observatory-dev` Mongo creds:
@@ -130,8 +131,8 @@ kubectl create secret generic mongodb-credentials \
   --from-literal=password="$(openssl rand -base64 24)" \
   --dry-run=client -o yaml \
 | kubeseal --format=yaml \
-  --controller-namespace=sealed-secrets \
-  --controller-name=sealed-secrets \
+  --controller-namespace=kube-system \
+  --controller-name=sealed-secrets-controller \
 > infra/k8s/overlays/dev/mongodb-credentials.sealed.yaml
 ```
 

@@ -5,6 +5,8 @@ namespace: observatory-prod
 
 resources:
   - ../../base
+  - mongodb-credentials.sealed.yaml
+  - api-secrets.sealed.yaml
 
 configMapGenerator:
   - name: app-config
