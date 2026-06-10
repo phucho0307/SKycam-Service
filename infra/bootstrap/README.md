@@ -82,24 +82,47 @@ Add a 4th public hostname on the tunnel, e.g. `argocd.observatory.services` →
 
 ### Give ArgoCD read access to this repo
 
-Since `ObservatoryServices/ObservatoryServices` is private:
+The repo is private and accessed via SSH deploy key (not a user PAT — survives
+account changes and is repo-scoped):
 
-1. Generate a fine-grained PAT or deploy key with **read-only access to this repo**.
-2. In ArgoCD UI → Settings → Repositories → Connect Repo via HTTPS:
-   - URL: `https://github.com/ObservatoryServices/ObservatoryServices.git`
-   - Username: anything (e.g. `argocd`)
-   - Password: the PAT
+1. Generate a passphrase-less ed25519 keypair just for ArgoCD.
+2. Add the **public** key as a Deploy Key on the repo (Settings → Deploy keys →
+   Add deploy key, **Allow write access unchecked**).
+3. Build a Secret manifest with the **private** key and the SSH URL, then seal
+   it with kubeseal:
 
-Or via CLI:
+   ```bash
+   PRIV=$(sed 's/^/    /' /path/to/argocd_deploy_key)
+   cat <<EOF | kubeseal --format=yaml --cert sealed-secrets-pub.pem \
+     > infra/argocd/repo-secret.sealed.yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: github-observatoryservices-repo
+     namespace: argocd
+     labels:
+       argocd.argoproj.io/secret-type: repository
+   type: Opaque
+   stringData:
+     type: git
+     url: git@github.com:ObservatoryServices/ObservatoryServices.git
+     sshPrivateKey: |
+   $PRIV
+   EOF
+   ```
 
-```bash
-argocd repo add https://github.com/ObservatoryServices/ObservatoryServices.git \
-  --username argocd --password "$GH_PAT"
-```
+4. Commit `infra/argocd/repo-secret.sealed.yaml`. Delete the local
+   `argocd_deploy_key` private key file once sealed — git has it.
 
 ## 4. Apply the AppProject and the root Application
 
+The repo-secret must be applied first so ArgoCD can read the repo. The
+SealedSecrets controller decrypts it into an actual `github-observatoryservices-repo`
+Secret in the argocd namespace, which ArgoCD picks up via the
+`argocd.argoproj.io/secret-type=repository` label.
+
 ```bash
+kubectl apply -f infra/argocd/repo-secret.sealed.yaml
 kubectl apply -f infra/argocd/project.yaml
 kubectl apply -f infra/argocd/root.yaml
 ```

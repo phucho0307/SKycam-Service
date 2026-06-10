@@ -6,7 +6,7 @@ metadata:
 spec:
   description: Observatory Services platform — environments + supporting infra
   sourceRepos:
-    - https://github.com/ObservatoryServices/ObservatoryServices.git
+    - git@github.com:ObservatoryServices/ObservatoryServices.git
   destinations:
     - namespace: observatory-dev
       server: https://kubernetes.default.svc

@@ -10,7 +10,7 @@ metadata:
 spec:
   project: observatory
   source:
-    repoURL: https://github.com/ObservatoryServices/ObservatoryServices.git
+    repoURL: git@github.com:ObservatoryServices/ObservatoryServices.git
     targetRevision: main
     path: infra/k8s/overlays/prod
   destination:
