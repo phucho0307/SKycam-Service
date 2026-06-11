@@ -40,5 +40,5 @@ fn rocket() -> _ {
     //  - GET /winget/:product/manifest.yaml
     //  - Push to Homebrew tap repo
 
-    rocket::custom(figment).mount("/", routes![healthz])
+    rocket::custom(figment).mount("/releases", routes![healthz])
 }

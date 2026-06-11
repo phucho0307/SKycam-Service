@@ -49,13 +49,13 @@ spec:
                   key: mongodb_uri
           readinessProbe:
             httpGet:
-              path: /readyz
+              path: /api/readyz
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /api/healthz
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20

@@ -53,7 +53,7 @@ spec:
             # all from secretKeyRef:name=release-proxy-secrets.
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /releases/healthz
               port: 8001
             initialDelaySeconds: 5
             periodSeconds: 10

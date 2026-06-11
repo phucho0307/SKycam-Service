@@ -26,5 +26,5 @@ async fn rocket() -> _ {
     rocket::custom(figment)
         .manage(db)
         .manage(cfg)
-        .mount("/", routes::all())
+        .mount("/api", routes::all())
 }
