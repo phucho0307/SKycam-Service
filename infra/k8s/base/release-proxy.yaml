@@ -47,31 +47,10 @@ spec:
                 configMapKeyRef:
                   name: app-config
                   key: s3_bucket
-            - name: S3_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: release-proxy-secrets
-                  key: s3_access_key
-            - name: S3_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: release-proxy-secrets
-                  key: s3_secret_key
-            - name: GITHUB_APP_ID
-              valueFrom:
-                secretKeyRef:
-                  name: release-proxy-secrets
-                  key: github_app_id
-            - name: GITHUB_APP_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: release-proxy-secrets
-                  key: github_app_private_key
-            - name: GITHUB_APP_INSTALLATION_ID
-              valueFrom:
-                secretKeyRef:
-                  name: release-proxy-secrets
-                  key: github_app_installation_id
+            # Phase 1c wires S3 + GitHub App secrets here:
+            #   S3_ACCESS_KEY, S3_SECRET_KEY, GITHUB_APP_ID,
+            #   GITHUB_APP_PRIVATE_KEY, GITHUB_APP_INSTALLATION_ID
+            # all from secretKeyRef:name=release-proxy-secrets.
           readinessProbe:
             httpGet:
               path: /healthz
