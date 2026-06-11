@@ -17,6 +17,7 @@ async fn rocket() -> _ {
         .init();
 
     let cfg = Config::from_env().expect("invalid configuration");
+    tracing::info!(env = %cfg.environment, port = cfg.port, "api starting");
     let db = Db::connect(&cfg).await.expect("mongodb connection failed");
 
     let figment = rocket::Config::figment()
