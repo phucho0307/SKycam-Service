@@ -9,7 +9,9 @@ Outbound-only TLS-terminated path from Cloudflare's edge to the cluster. Require
    - Name it `observatory-services` (or similar)
    - Copy the install token shown for "Docker" / "Kubernetes" — that long base64 string is what we need
 
-2. **Add public hostnames** on the tunnel — all three point at the same in-cluster Traefik service:
+2. **Add public hostnames** on the tunnel.
+
+   Site hostnames — all point at the in-cluster Traefik service:
 
    | Subdomain    | Domain                 | Service                                       |
    | ------------ | ---------------------- | --------------------------------------------- |
@@ -17,7 +19,15 @@ Outbound-only TLS-terminated path from Cloudflare's edge to the cluster. Require
    | `dev`        | `observatory.services` | `http://traefik.ingress.svc.cluster.local:80` |
    | `release`    | `observatory.services` | `http://traefik.ingress.svc.cluster.local:80` |
 
-   For each, expand **Additional application settings → HTTP Settings** and set the **HTTP Host Header** to the public hostname (e.g. `dev.observatory.services`). Traefik routes by Host, so this header must survive the tunnel hop.
+   For each site hostname, expand **Additional application settings → HTTP Settings** and set the **HTTP Host Header** to the public hostname (e.g. `dev.observatory.services`). Traefik routes by Host, so this header must survive the tunnel hop.
+
+   Storage hostname — points directly at MinIO (Traefik isn't in the path because S3 clients send a hostname Traefik wouldn't have an Ingress for):
+
+   | Subdomain | Domain                 | Service                                       |
+   | --------- | ---------------------- | --------------------------------------------- |
+   | `s3`      | `observatory.services` | `http://minio.minio.svc.cluster.local:9000`   |
+
+   Leave the HTTP Host Header at its default (MinIO is host-agnostic for path-style requests).
 
 3. **Seal the token** and commit it:
 

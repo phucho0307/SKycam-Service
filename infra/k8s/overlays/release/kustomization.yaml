@@ -7,14 +7,17 @@ resources:
   - ../../base
   - mongodb-credentials.sealed.yaml
   - api-secrets.sealed.yaml
+  - release-proxy-secrets.sealed.yaml
 
 configMapGenerator:
   - name: app-config
     literals:
       - environment=release
       - mongodb_db=observatory_release
-      - s3_endpoint=<S3_ENDPOINT>
+      - s3_endpoint=http://minio.minio.svc.cluster.local:9000
+      - s3_public_endpoint=https://s3.observatory.services
       - s3_bucket=observatory-release
+      - s3_region=us-east-1
 
 patches:
   - target:

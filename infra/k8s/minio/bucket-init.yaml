@@ -1,0 +1,104 @@
+# Creates buckets and per-env users on first start (idempotent on re-run).
+# Buckets:
+#   observatory-dev, observatory-release, observatory-prod
+# Users (one per env, attached to a policy scoped to one bucket):
+#   <env>-user
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minio-bucket-init-script
+  namespace: minio
+data:
+  init.sh: |
+    #!/bin/sh
+    set -eu
+
+    until mc alias set local "http://minio:9000" "$ROOT_USER" "$ROOT_PASS" 2>/dev/null; do
+      echo "waiting for minio..."
+      sleep 2
+    done
+
+    for env in dev release prod; do
+      bucket="observatory-${env}"
+      ak_var="$(echo "${env}_AK" | tr a-z A-Z)"
+      sk_var="$(echo "${env}_SK" | tr a-z A-Z)"
+      ak="$(eval "echo \$${ak_var}")"
+      sk="$(eval "echo \$${sk_var}")"
+
+      mc mb --ignore-existing "local/${bucket}"
+
+      cat >/tmp/policy-${env}.json <<JSON
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": ["s3:*"],
+          "Resource": [
+            "arn:aws:s3:::${bucket}",
+            "arn:aws:s3:::${bucket}/*"
+          ]
+        }
+      ]
+    }
+    JSON
+      mc admin policy create local "observatory-${env}-rw" /tmp/policy-${env}.json || true
+
+      if ! mc admin user info local "${ak}" >/dev/null 2>&1; then
+        mc admin user add local "${ak}" "${sk}"
+      fi
+      mc admin policy attach local "observatory-${env}-rw" --user "${ak}" || true
+
+      # Public-read on objects published by the release-proxy so direct
+      # download URLs work without presigning (binaries are public anyway).
+      mc anonymous set download "local/${bucket}/releases" || true
+    done
+
+    echo "bucket-init complete"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-init
+  namespace: minio
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2025-04-22T17-39-04Z
+          command: ["/bin/sh", "/scripts/init.sh"]
+          env:
+            - name: ROOT_USER
+              valueFrom:
+                secretKeyRef: { name: minio-root, key: user }
+            - name: ROOT_PASS
+              valueFrom:
+                secretKeyRef: { name: minio-root, key: password }
+            - name: DEV_AK
+              valueFrom:
+                secretKeyRef: { name: minio-bucket-users, key: dev_access_key }
+            - name: DEV_SK
+              valueFrom:
+                secretKeyRef: { name: minio-bucket-users, key: dev_secret_key }
+            - name: RELEASE_AK
+              valueFrom:
+                secretKeyRef: { name: minio-bucket-users, key: release_access_key }
+            - name: RELEASE_SK
+              valueFrom:
+                secretKeyRef: { name: minio-bucket-users, key: release_secret_key }
+            - name: PROD_AK
+              valueFrom:
+                secretKeyRef: { name: minio-bucket-users, key: prod_access_key }
+            - name: PROD_SK
+              valueFrom:
+                secretKeyRef: { name: minio-bucket-users, key: prod_secret_key }
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: minio-bucket-init-script
+            defaultMode: 0755

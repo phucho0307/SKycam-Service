@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull *)",
+      "Bash(ssh -o BatchMode=yes obsserv 'echo === ARGOCD APPS === && kubectl -n argocd get applications && echo === DEV PODS === && kubectl -n observatory-dev get pods && echo === RELEASE PODS === && kubectl -n observatory-release get pods')",
+      "Bash(ssh -o BatchMode=yes obsserv 'kubectl -n argocd annotate application observatory-dev argocd.argoproj.io/refresh=hard --overwrite && kubectl -n argocd annotate application observatory-release argocd.argoproj.io/refresh=hard --overwrite')",
+      "Bash(ssh -o BatchMode=yes obsserv 'echo === APPS === && kubectl -n argocd get applications && echo === DEV PODS === && kubectl -n observatory-dev get pods && echo === REL PODS === && kubectl -n observatory-release get pods')",
+      "Bash(curl -sI https://dev.observatory.services/)",
+      "Bash(curl -s https://dev.observatory.services/)",
+      "Bash(curl -s https://dev.observatory.services/api/healthz)",
+      "Bash(nslookup dev.observatory.services 8.8.8.8)",
+      "Bash(nslookup observatory.services 8.8.8.8)",
+      "Bash(ssh -o BatchMode=yes obsserv 'kubectl -n argocd get application observatory-dev -o jsonpath=\"{.status.conditions}\" 2>/dev/null; echo; kubectl -n argocd get application observatory-dev -o jsonpath=\"{.status.operationState.message}\"; echo; kubectl -n observatory-dev get rs')",
+      "Bash(nslookup release.observatory.services 8.8.8.8)",
+      "Bash(curl -sI https://release.observatory.services/)",
+      "Bash(curl -sI --resolve dev.observatory.services:443:104.21.6.246 https://dev.observatory.services/)",
+      "Bash(curl -s --resolve dev.observatory.services:443:104.21.6.246 https://dev.observatory.services/)",
+      "Bash(curl -s --resolve dev.observatory.services:443:104.21.6.246 https://dev.observatory.services/api/healthz)",
+      "Bash(curl -sI --resolve release.observatory.services:443:104.21.6.246 https://release.observatory.services/)",
+      "Bash(cargo fmt *)",
+      "Bash(git rebase *)",
+      "Bash(cargo clippy *)",
+      "Bash(ssh -o BatchMode=yes obsserv 'kubectl -n observatory-release get pods && echo --- && kubectl -n observatory-release describe pod -l app=api 2>/dev/null | grep -E \"Image:|Failed|Pulling|Ready \" | head -10')",
+      "Bash(ssh -o BatchMode=yes obsserv 'kubectl -n argocd get application observatory-release -o jsonpath=\"{.status.operationState.message}\"; echo; kubectl -n argocd get application observatory-release -o jsonpath=\"{.status.resources[?\\(@.kind==\\\\\"Deployment\\\\\"\\)].health.message}\"')",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
