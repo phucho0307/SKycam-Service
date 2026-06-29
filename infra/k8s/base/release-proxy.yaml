@@ -37,6 +37,16 @@ spec:
                 configMapKeyRef:
                   name: app-config
                   key: environment
+            - name: MONGODB_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: mongodb_db
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: mongodb_uri
             - name: S3_ENDPOINT
               valueFrom:
                 configMapKeyRef:
