@@ -1,44 +1,62 @@
 #[macro_use]
 extern crate rocket;
 
-use rocket::serde::json::Json;
-use serde::Serialize;
+mod config;
+mod db;
+mod github;
+mod products;
+mod routes;
+mod storage;
+mod sync;
 
-#[derive(Serialize)]
-struct Health {
-    status: &'static str,
-}
-
-#[get("/healthz")]
-fn healthz() -> Json<Health> {
-    Json(Health { status: "ok" })
-}
+use config::Config;
+use db::Db;
+use github::GithubAppClient;
+use storage::Storage;
 
 #[launch]
-fn rocket() -> _ {
+async fn rocket() -> _ {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8001);
+    let cfg = Config::from_env().expect("invalid configuration");
+    tracing::info!(env = %cfg.environment, port = cfg.port, "release-proxy starting");
+
+    let db = Db::connect(&cfg).await.expect("mongodb connection failed");
+    let storage = Storage::connect(&cfg).await.expect("s3 connection failed");
+    let gh = GithubAppClient::new(
+        cfg.github_app_id,
+        cfg.github_app_installation_id,
+        &cfg.github_app_private_key_pem,
+    )
+    .expect("github app client init failed");
+
+    let products_file =
+        products::load(&cfg.products_config_path).expect("products config load failed");
+    tracing::info!(
+        products = products_file.products.len(),
+        path = %cfg.products_config_path,
+        "loaded product registry"
+    );
+
+    let sync_cfg = cfg.clone();
+    let sync_db = db.clone();
+    let sync_storage = storage.clone();
+    let sync_products = products_file.products.clone();
+    tokio::spawn(async move {
+        sync::run(sync_cfg, sync_db, sync_storage, gh, sync_products).await;
+    });
 
     let figment = rocket::Config::figment()
         .merge(("address", "0.0.0.0"))
-        .merge(("port", port));
+        .merge(("port", cfg.port));
 
-    // TODO Phase 1c:
-    //  - GitHub App auth (poll + webhook)
-    //  - Sync releases from configured private repos
-    //  - Cache binaries to S3 (`<S3_ENDPOINT>` / `<S3_BUCKET>`)
-    //  - GET /releases/:product, /releases/:product/:version, /download/:product/:version/:asset
-    //  - POST /feature-requests -> create GitHub Issue
-    //  - GET /winget/:product/manifest.yaml
-    //  - Push to Homebrew tap repo
-
-    rocket::custom(figment).mount("/releases", routes![healthz])
+    rocket::custom(figment)
+        .manage(db)
+        .manage(storage)
+        .manage(cfg)
+        .mount("/releases", routes::all())
 }

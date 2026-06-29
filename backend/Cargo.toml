@@ -26,5 +26,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
+jsonwebtoken = "9"
+serde_yaml = "0.9"
+bytes = "1"
+aws-config = { version = "1", default-features = false, features = ["rustls", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["rustls", "rt-tokio", "behavior-version-latest"] }
+aws-credential-types = { version = "1", features = ["hardcoded-credentials"] }
+aws-smithy-types = "1"
 
 domain = { path = "crates/domain" }
