@@ -47,10 +47,52 @@ spec:
                 configMapKeyRef:
                   name: app-config
                   key: s3_bucket
-            # Phase 1c wires S3 + GitHub App secrets here:
-            #   S3_ACCESS_KEY, S3_SECRET_KEY, GITHUB_APP_ID,
-            #   GITHUB_APP_PRIVATE_KEY, GITHUB_APP_INSTALLATION_ID
-            # all from secretKeyRef:name=release-proxy-secrets.
+            - name: S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_region
+            - name: S3_PUBLIC_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_public_endpoint
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: release-proxy-secrets
+                  key: s3_access_key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: release-proxy-secrets
+                  key: s3_secret_key
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: github-app-credentials
+                  key: app_id
+            - name: GITHUB_APP_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: github-app-credentials
+                  key: client_id
+            - name: GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: github-app-credentials
+                  key: installation_id
+            - name: GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: github-app-credentials
+                  key: private_key
+            - name: PRODUCTS_CONFIG_PATH
+              value: /config/products.yaml
+          volumeMounts:
+            - name: products
+              mountPath: /config
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /releases/healthz
@@ -64,3 +106,7 @@ spec:
             limits:
               cpu: "500m"
               memory: "256Mi"
+      volumes:
+        - name: products
+          configMap:
+            name: products

@@ -10,3 +10,4 @@ resources:
   - release-proxy.yaml
   - frontend.yaml
   - ingress.yaml
+  - products.yaml

@@ -8,6 +8,7 @@ resources:
 - mongodb-credentials.sealed.yaml
 - api-secrets.sealed.yaml
 - release-proxy-secrets.sealed.yaml
+- github-app-credentials.sealed.yaml
 
 configMapGenerator:
 - literals:

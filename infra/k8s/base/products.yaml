@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: products
+data:
+  products.yaml: |
+    # Source-of-truth product registry consumed by release-proxy.
+    # Each product maps a GitHub repo to user-facing distribution metadata.
+    products:
+      - id: telrun-monitor
+        github_repo: ObservatoryServices/TelrunMonitor
+        display_name: Telrun Monitor
+        winget_package_id: ObservatorySolutions.TelrunMonitor
+        homebrew_formula: telrun-monitor
+
+      - id: apogee-control
+        github_repo: ObservatoryServices/apogee_control
+        display_name: Apogee Control
+        winget_package_id: ObservatorySolutions.ApogeeControl
+        homebrew_formula: apogee-control
+
+      - id: fits-utils
+        github_repo: ObservatoryServices/Fits_Utils
+        display_name: FITS Utils
+        winget_package_id: ObservatorySolutions.FitsUtils
+        homebrew_formula: fits-utils
+
+      - id: rrscope
+        github_repo: ObservatoryServices/RRScope
+        display_name: RRScope
+        winget_package_id: ObservatorySolutions.RRScope
+        homebrew_formula: rrscope
