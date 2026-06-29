@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use bson::doc;
 use chrono::Utc;
 use mongodb::options::ReplaceOptions;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::config::Config;
@@ -14,8 +15,8 @@ pub async fn run(
     cfg: Config,
     db: Db,
     storage: Storage,
-    gh: GithubAppClient,
-    products: Vec<Product>,
+    gh: Arc<GithubAppClient>,
+    products: Arc<Vec<Product>>,
 ) {
     let interval = Duration::from_secs(cfg.sync_interval_seconds);
     tracing::info!(
@@ -25,7 +26,7 @@ pub async fn run(
     );
 
     loop {
-        for product in &products {
+        for product in products.iter() {
             if let Err(e) = sync_product(&db, &storage, &gh, product).await {
                 tracing::error!(product = %product.id, error = %e, "product sync failed");
             }

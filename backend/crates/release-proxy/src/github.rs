@@ -148,6 +148,49 @@ impl GithubAppClient {
         Ok(releases)
     }
 
+    /// POST to /repos/{owner}/{repo}/issues. Returns the new issue's html_url.
+    pub async fn create_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<String> {
+        let token = self.installation_token().await?;
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/issues");
+        let payload = serde_json::json!({
+            "title": title,
+            "body": body,
+            "labels": labels,
+        });
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| format!("creating issue on {owner}/{repo}"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "create issue failed on {owner}/{repo}: {status} body={body}"
+            ));
+        }
+
+        #[derive(Deserialize)]
+        struct CreatedIssue {
+            html_url: String,
+        }
+        let issue: CreatedIssue = resp.json().await.context("parsing created issue")?;
+        Ok(issue.html_url)
+    }
+
     /// Stream-download a release asset by its API id. Returns bytes + content-type.
     pub async fn download_asset(
         &self,

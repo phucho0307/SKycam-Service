@@ -17,6 +17,10 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
       },
+      "/releases": {
+        target: "http://localhost:8001",
+        changeOrigin: true,
+      },
     },
   },
 });
