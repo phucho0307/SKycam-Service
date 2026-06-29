@@ -32,10 +32,10 @@ patches:
 images:
 - name: ghcr.io/observatoryservices/observatory-services-api
   newName: ghcr.io/observatoryservices/observatory-services-api
-  newTag: main-45fb7b1
+  newTag: main-0a5d0e1
 - name: ghcr.io/observatoryservices/observatory-services-frontend
   newName: ghcr.io/observatoryservices/observatory-services-frontend
-  newTag: main-45fb7b1
+  newTag: main-0a5d0e1
 - name: ghcr.io/observatoryservices/observatory-services-release-proxy
   newName: ghcr.io/observatoryservices/observatory-services-release-proxy
-  newTag: main-45fb7b1
+  newTag: main-0a5d0e1
