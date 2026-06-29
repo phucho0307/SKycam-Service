@@ -67,7 +67,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: minio/mc:RELEASE.2025-04-22T17-39-04Z
+          image: minio/mc:RELEASE.2025-07-21T05-28-08Z
           command: ["/bin/sh", "/scripts/init.sh"]
           env:
             - name: ROOT_USER
