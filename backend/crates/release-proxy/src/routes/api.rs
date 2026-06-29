@@ -12,6 +12,7 @@ use crate::db::{Db, SyncedRelease};
 use crate::github::GithubAppClient;
 use crate::products::Product;
 use crate::storage::Storage;
+use crate::turnstile;
 
 #[derive(Serialize)]
 pub struct ProductSummary {
@@ -175,6 +176,7 @@ pub struct FeatureRequest {
     body: String,
     reporter_name: Option<String>,
     reporter_email: Option<String>,
+    turnstile_token: String,
 }
 
 #[derive(Serialize)]
@@ -182,20 +184,45 @@ pub struct FeatureRequestCreated {
     issue_url: String,
 }
 
+#[derive(Serialize)]
+pub struct TurnstileSitekey {
+    sitekey: String,
+}
+
+#[get("/turnstile-sitekey")]
+pub fn turnstile_sitekey(tc: &State<turnstile::Config>) -> Json<TurnstileSitekey> {
+    Json(TurnstileSitekey {
+        sitekey: tc.sitekey.clone(),
+    })
+}
+
 #[post("/feature-requests", data = "<req>")]
 pub async fn create_feature_request(
     req: Json<FeatureRequest>,
     products: &State<Arc<Vec<Product>>>,
     gh: &State<Arc<GithubAppClient>>,
+    tc: &State<turnstile::Config>,
 ) -> Result<Json<FeatureRequestCreated>, Status> {
     let req = req.into_inner();
     if req.title.trim().is_empty()
         || req.title.len() > 200
         || req.body.trim().is_empty()
         || req.body.len() > 8000
+        || req.turnstile_token.trim().is_empty()
     {
         return Err(Status::BadRequest);
     }
+
+    let ok = turnstile::verify(&tc.secret, &req.turnstile_token)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "turnstile verify error");
+            Status::BadGateway
+        })?;
+    if !ok {
+        return Err(Status::Forbidden);
+    }
+
     let product = products
         .iter()
         .find(|p| p.id == req.product_id)

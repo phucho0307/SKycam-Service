@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { submitFeatureRequest } from "@/lib/releases";
+import { useCallback, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { getTurnstileSitekey, submitFeatureRequest } from "@/lib/releases";
+import Turnstile from "./Turnstile";
 
 interface Props {
   productId: string;
@@ -13,19 +14,30 @@ export default function FeatureRequestModal({ productId, productName, onClose }:
   const [body, setBody] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [token, setToken] = useState<string | null>(null);
+
+  const sitekey = useQuery({
+    queryKey: ["turnstile-sitekey"],
+    queryFn: getTurnstileSitekey,
+    staleTime: Infinity,
+  });
 
   const mutation = useMutation({
     mutationFn: submitFeatureRequest,
   });
 
+  const onToken = useCallback((t: string | null) => setToken(t), []);
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!token) return;
     mutation.mutate({
       product_id: productId,
       title: title.trim(),
       body: body.trim(),
       reporter_name: name.trim() || undefined,
       reporter_email: email.trim() || undefined,
+      turnstile_token: token,
     });
   }
 
@@ -41,6 +53,10 @@ export default function FeatureRequestModal({ productId, productName, onClose }:
         <h2 className="text-xl font-semibold">Request a feature for {productName}</h2>
         <p className="mt-1 text-sm text-slate-400">
           Submitted as a GitHub issue on the source repository.
+        </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Anonymous submission for now. Google sign-in is coming soon, which will pre-fill your
+          name + email and link the issue to your account.
         </p>
 
         {mutation.isSuccess ? (
@@ -107,6 +123,17 @@ export default function FeatureRequestModal({ productId, productName, onClose }:
               </label>
             </div>
 
+            <div className="pt-1">
+              {sitekey.data && (
+                <Turnstile sitekey={sitekey.data.sitekey} onToken={onToken} />
+              )}
+              {sitekey.isError && (
+                <p className="text-xs text-red-400">
+                  Could not load bot protection: {(sitekey.error as Error).message}
+                </p>
+              )}
+            </div>
+
             {mutation.isError && (
               <p className="text-sm text-red-400">
                 Submission failed: {(mutation.error as Error).message}
@@ -123,10 +150,10 @@ export default function FeatureRequestModal({ productId, productName, onClose }:
               </button>
               <button
                 type="submit"
-                disabled={mutation.isPending}
+                disabled={mutation.isPending || !token}
                 className="rounded-lg bg-brand-500 px-4 py-2 font-medium text-slate-950 disabled:opacity-60"
               >
-                {mutation.isPending ? "Submitting..." : "Submit"}
+                {mutation.isPending ? "Submitting…" : "Submit"}
               </button>
             </div>
           </form>

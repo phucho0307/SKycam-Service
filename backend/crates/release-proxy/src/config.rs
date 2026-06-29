@@ -17,6 +17,8 @@ pub struct Config {
     pub github_app_private_key_pem: String,
     pub products_config_path: String,
     pub sync_interval_seconds: u64,
+    pub turnstile_sitekey: String,
+    pub turnstile_secret: String,
 }
 
 impl Config {
@@ -37,6 +39,8 @@ impl Config {
             github_app_private_key_pem: env_required("GITHUB_APP_PRIVATE_KEY")?,
             products_config_path: env_str("PRODUCTS_CONFIG_PATH", "/config/products.yaml"),
             sync_interval_seconds: env_parse("SYNC_INTERVAL_SECONDS", 300)?,
+            turnstile_sitekey: env_required("TURNSTILE_SITEKEY")?,
+            turnstile_secret: env_required("TURNSTILE_SECRET")?,
         })
     }
 }

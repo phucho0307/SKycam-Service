@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getProduct, type ProductSummary } from "@/lib/releases";
+import {
+  getProduct,
+  groupAssetsByPlatform,
+  platformLabels,
+  platformOrder,
+  type ProductSummary,
+} from "@/lib/releases";
 import AssetButton from "./AssetButton";
 import FeatureRequestModal from "./FeatureRequestModal";
 
@@ -92,10 +98,46 @@ export default function ProductCard({ product }: { product: ProductSummary }) {
                   </pre>
                 </details>
               )}
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {r.assets.map((a) => (
-                  <AssetButton key={a.filename} asset={a} />
-                ))}
+              <div className="mt-3 space-y-2">
+                {(() => {
+                  const groups = groupAssetsByPlatform(r.assets);
+                  return platformOrder
+                    .filter((p) => groups.has(p))
+                    .map((p) => {
+                      const assets = groups.get(p)!;
+                      return (
+                        <details
+                          key={p}
+                          open
+                          className="group rounded-lg border border-slate-800 bg-slate-950/40"
+                        >
+                          <summary className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm font-medium text-slate-200 hover:text-white">
+                            <svg
+                              className="h-3 w-3 shrink-0 text-slate-500 transition-transform group-open:rotate-90"
+                              viewBox="0 0 20 20"
+                              fill="currentColor"
+                              aria-hidden="true"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                            <span>{platformLabels[p]}</span>
+                            <span className="text-xs font-normal text-slate-500">
+                              ({assets.length})
+                            </span>
+                          </summary>
+                          <div className="space-y-1.5 px-2 pb-2">
+                            {assets.map((a) => (
+                              <AssetButton key={a.filename} asset={a} />
+                            ))}
+                          </div>
+                        </details>
+                      );
+                    });
+                })()}
               </div>
             </div>
           ))}

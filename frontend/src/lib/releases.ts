@@ -52,6 +52,11 @@ export interface FeatureRequestPayload {
   body: string;
   reporter_name?: string;
   reporter_email?: string;
+  turnstile_token: string;
+}
+
+export function getTurnstileSitekey() {
+  return call<{ sitekey: string }>("/turnstile-sitekey");
 }
 
 export function listProducts() {
@@ -69,10 +74,13 @@ export function submitFeatureRequest(payload: FeatureRequestPayload) {
   });
 }
 
-export type AssetPlatform = "windows" | "macos" | "linux" | "other";
+export type AssetPlatform = "windows" | "macos" | "linux" | "ascom" | "other";
 
 export function detectPlatform(filename: string): AssetPlatform {
   const lower = filename.toLowerCase();
+  if (lower.includes("ascom")) {
+    return "ascom";
+  }
   if (
     lower.endsWith(".msi") ||
     lower.endsWith(".exe") ||
@@ -98,6 +106,36 @@ export function detectPlatform(filename: string): AssetPlatform {
     return "linux";
   }
   return "other";
+}
+
+export const platformOrder: AssetPlatform[] = [
+  "windows",
+  "macos",
+  "linux",
+  "ascom",
+  "other",
+];
+
+export const platformLabels: Record<AssetPlatform, string> = {
+  windows: "Windows",
+  macos: "macOS",
+  linux: "Linux",
+  ascom: "ASCOM driver",
+  other: "Other",
+};
+
+export function groupAssetsByPlatform(assets: Asset[]): Map<AssetPlatform, Asset[]> {
+  const groups = new Map<AssetPlatform, Asset[]>();
+  for (const a of assets) {
+    const p = detectPlatform(a.filename);
+    const list = groups.get(p) ?? [];
+    list.push(a);
+    groups.set(p, list);
+  }
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.filename.localeCompare(b.filename));
+  }
+  return groups;
 }
 
 export function detectArch(filename: string): string | null {

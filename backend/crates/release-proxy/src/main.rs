@@ -8,6 +8,7 @@ mod products;
 mod routes;
 mod storage;
 mod sync;
+mod turnstile;
 
 use std::sync::Arc;
 
@@ -60,11 +61,17 @@ async fn rocket() -> _ {
         .merge(("address", "0.0.0.0"))
         .merge(("port", cfg.port));
 
+    let turnstile_cfg = turnstile::Config {
+        sitekey: cfg.turnstile_sitekey.clone(),
+        secret: cfg.turnstile_secret.clone(),
+    };
+
     rocket::custom(figment)
         .manage(db)
         .manage(storage)
         .manage(gh)
         .manage(products)
+        .manage(turnstile_cfg)
         .manage(cfg)
         .mount("/releases", routes::root())
         .mount("/releases/api", routes::api_routes())

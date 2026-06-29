@@ -13,5 +13,6 @@ pub fn api_routes() -> Vec<Route> {
         api::product_detail,
         api::download_asset,
         api::create_feature_request,
+        api::turnstile_sitekey,
     ]
 }

@@ -28,7 +28,7 @@ export default function Software() {
         </p>
       )}
       {products.data && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="space-y-4">
           {products.data.map((p) => (
             <ProductCard key={p.id} product={p} />
           ))}
