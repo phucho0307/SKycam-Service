@@ -35,3 +35,5 @@ aws-credential-types = { version = "1", features = ["hardcoded-credentials"] }
 aws-smithy-types = "1"
 
 domain = { path = "crates/domain" }
+
+# trigger: build-and-deploy after force-push that dropped only infra files
