@@ -5,6 +5,7 @@ const links = [
   { to: "/software", label: "Software" },
   { to: "/imaging", label: "Imaging" },
   { to: "/observatories", label: "Observatories" },
+  { to: "/camera", label: "Sky Camera" },
 ];
 
 export default function Navbar() {

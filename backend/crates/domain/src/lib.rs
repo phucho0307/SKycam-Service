@@ -69,3 +69,45 @@ pub enum Arch {
     X86_64,
     Aarch64,
 }
+
+/// A single environmental reading from a device (e.g. AHT10 on the sky camera Pi).
+/// Small and high-frequency — stored as its own time-series in the `telemetry` collection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelemetryReading {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub device_id: String,
+    /// When the device sampled the value.
+    pub recorded_at: DateTime<Utc>,
+    /// When the server received it (stamped server-side, never trusted from the client).
+    pub received_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature_c: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub humidity_pct: Option<f64>,
+}
+
+/// Metadata for one captured camera frame. The image bytes live in object storage
+/// (S3/R2) under `s3_key`; only this metadata lives in the `frames` collection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Frame {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub device_id: String,
+    pub captured_at: DateTime<Utc>,
+    pub received_at: DateTime<Utc>,
+    /// Object key of the full FITS in the bucket (bytes are not stored in Mongo).
+    pub s3_key: String,
+    /// Object key of the small web-viewable JPEG preview, if the device sent one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_key: Option<String>,
+    pub content_type: String,
+    pub size_bytes: u64,
+    /// Environmental / capture metadata stamped onto the frame at capture time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature_c: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gain: Option<i64>,
+}

@@ -48,6 +48,10 @@ jobs:
             context: backend
             dockerfile: backend/Dockerfile
             build_args: APP_BIN=api
+          - name: skycam
+            context: backend
+            dockerfile: backend/Dockerfile
+            build_args: APP_BIN=skycam
           - name: release-proxy
             context: backend
             dockerfile: backend/Dockerfile
@@ -99,6 +103,7 @@ jobs:
         run: |
           kustomize edit set image \
             ${{ env.IMAGE_PREFIX }}-api=${{ env.IMAGE_PREFIX }}-api:${{ needs.resolve.outputs.tag }} \
+            ${{ env.IMAGE_PREFIX }}-skycam=${{ env.IMAGE_PREFIX }}-skycam:${{ needs.resolve.outputs.tag }} \
             ${{ env.IMAGE_PREFIX }}-release-proxy=${{ env.IMAGE_PREFIX }}-release-proxy:${{ needs.resolve.outputs.tag }} \
             ${{ env.IMAGE_PREFIX }}-frontend=${{ env.IMAGE_PREFIX }}-frontend:${{ needs.resolve.outputs.tag }}
 

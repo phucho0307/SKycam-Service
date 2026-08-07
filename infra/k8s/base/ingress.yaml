@@ -32,6 +32,13 @@ spec:
                 name: release-proxy
                 port:
                   number: 80
+          - path: /skycam/
+            pathType: Prefix
+            backend:
+              service:
+                name: skycam
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:

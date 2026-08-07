@@ -50,6 +50,7 @@ name = "api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aws-sdk-s3",
  "bson",
  "chrono",
  "domain",

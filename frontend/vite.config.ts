@@ -21,6 +21,10 @@ export default defineConfig({
         target: "http://localhost:8001",
         changeOrigin: true,
       },
+      "/skycam": {
+        target: "http://localhost:8002",
+        changeOrigin: true,
+      },
     },
   },
 });
