@@ -148,9 +148,12 @@ table). Data via react-query; Vite proxies `/skycam` → the service.
 
 `send.py` each cycle: reads AHT10 (raw I²C via `smbus2`), captures a frame
 (`zwoasi`), writes temp/exposure/gain into the **FITS header** (self-describing
-frames), then POSTs telemetry + image. **Graceful degradation:** missing sensor or
-lib → skip that part, keep going (works during incremental hardware bring-up).
-*Pending update:* also emit a JPEG preview and switch paths to `/skycam/...`.
+frames), then POSTs telemetry + image. It also emits a debayered **color JPEG
+preview** (OpenCV, RGGB) alongside the FITS and POSTs to `/skycam/frames` +
+`/skycam/telemetry`. **Graceful degradation:** missing sensor or lib → skip that
+part, keep going (works during incremental hardware bring-up). The repo also carries
+the standalone `capture_one.py` (single-capture test) and `live_view.py` (dual-mode
+preview).
 
 ## 8. Testing approach
 
@@ -164,6 +167,9 @@ Full **local stack in Docker**, no hardware, no production:
 - Ran real **`send.py`** against the API to validate its HTTP/auth/JSON layer.
 - Frontend: typechecked, ran the dev server, confirmed the GUI shows **real** data
   through the Vite `/skycam` proxy.
+- **Real hardware, end to end:** ran `send.py --once` on the actual Pi → a real
+  **25 MB FITS + color preview + 24 °C reading** flowed through to MinIO + MongoDB
+  and rendered in the GUI at `/camera`.
 
 ## 9. Engineering challenges I debugged *(great "hard bug" stories)*
 
@@ -189,6 +195,13 @@ lives was the whole skill:
    `cargo-chef` (which compiled the heavy crate **twice**) to a **single-pass** build.
    Then it completed.
 
+5. **School WiFi isolated the Pi from the laptop.** Client isolation blocks
+   device-to-device traffic, so the Pi couldn't reach the local backend directly.
+   **Fix:** a `cloudflared` **quick tunnel** — the laptop dials out to Cloudflare
+   (which assigns a public URL), the Pi hits that URL; both sides make only
+   *outbound* connections, so isolation doesn't apply. Same reverse-tunnel trick as
+   the production ingress, stood up on the laptop in one command.
+
 **Interview takeaway:** I separated code failures from environment failures by
 reading each error, forming a hypothesis, testing it *cheaply* before committing to
 a slow rebuild, and fixing one root cause at a time.
@@ -201,23 +214,25 @@ a slow rebuild, and fixing one root cause at a time.
 | `skycam` — read endpoints (latest/list/telemetry) | ✅ built, verified |
 | A1 — JPEG previews | ✅ endpoint accepts `preview`, stored in `previews/` |
 | B1 — presigned URLs (browser → S3 direct) | ✅ proven (`preview_url` loads image/jpeg) |
-| React admin GUI wired to real data | ✅ typechecks, live at `/skycam` |
-| Pi client updated to `/skycam` + preview | ⏳ pending (local edit) |
-| Real Pi hardware capture | ⏳ pending (school WiFi isolates devices → hotspot or deploy) |
+| React admin GUI wired to real data | ✅ typechecks, live at `/camera` |
+| Pi client updated to `/skycam` + color preview | ✅ done, pushed |
+| Real Pi hardware capture | ✅ validated end-to-end (via cloudflared tunnel) |
+| Deploy to `dev.observatory.services` | ✅ pushed to `dev`, CI/CD deploying |
+| dev ingest accepting data | ⏳ needs `skycam-secrets` Sealed Secret (cluster access) |
 | Cloud detection (Go service) | ⏳ deferred |
 | Image id = UUID/hash | ⏳ deferred |
-| Deploy to `dev.observatory.services` | ⏳ blocked on cluster access (Sealed Secret) |
 
 ## 11. What's next
 
-1. **Update the Pi client**: emit a JPEG preview, switch to `/skycam/frames` +
-   `/skycam/telemetry`.
-2. **Real hardware run** (needs a non-isolating network — phone hotspot, or deploy).
-3. **Deploy to dev**: `skycam.yaml` Deployment + `/skycam/` ingress + CI matrix
-   entry; create a **Sealed Secret** (needs cluster access) → ArgoCD syncs.
-4. **Cloud detection** as a Go microservice + alarms + an Alarms page.
-5. Keograms / timelapse (maybe a worker); live preview over WebSocket; presigned
-   *uploads* if body-size limits bite.
+1. Create the **`skycam-secrets`** Sealed Secret (token + S3 keys) so dev ingest
+   goes live end-to-end.
+2. **Cloud detection** as a separate **Go** microservice + alarms + an Alarms page —
+   the concrete next feature (likely the first *async* workload).
+3. Under consideration (see roadmap notes): a **broker** (Redis / Kafka) to run
+   detection & data products async; **keograms / timelapse**; a possible **DynamoDB**
+   migration (business-driven).
+4. Image-id scheme (hybrid timestamp + `sha256`); live preview over WebSocket;
+   presigned *uploads* if body-size limits bite.
 
 ## 12. Concepts I can speak to
 
