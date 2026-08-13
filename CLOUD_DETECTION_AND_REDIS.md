@@ -114,3 +114,55 @@ broadcast + "fine to miss if not connected" = exactly its use.
 **Middle ground for later:** Redis **Streams** are persistent like a queue **and**
 support multiple consumer groups with acknowledgements — the robust upgrade when a
 plain list isn't enough.
+
+---
+
+## Redis Streams vs Kafka
+
+Both share the same core idea — an **append-only log** with **consumer groups**,
+offsets, acknowledgements, and replay. The difference is **scale, durability, and
+operational weight.**
+
+| | **Redis Streams** | **Kafka** |
+|---|---|---|
+| What it is | a data structure **inside Redis** | a distributed **streaming platform** (broker cluster) |
+| Storage | **in-memory** first (RAM-bound; trim with `MAXLEN`) | **on disk**, replicated across brokers |
+| Scale | **single node** (one stream lives on one node) | **horizontal** — partitions across brokers → millions/sec |
+| Retention | keep it **small**; not for big history | **long** (hours→forever); store & replay |
+| Durability | weaker (RDB/AOF, replica failover) | **strong** (replicated, survives broker loss) |
+| Ops | **trivial** (just run Redis) | **heavy** (cluster, KRaft/ZooKeeper, tuning) |
+| Ecosystem | minimal | huge (Connect, Kafka Streams, ksqlDB) |
+| Latency | very low (in-memory) | low, optimized for **throughput** |
+
+**Analogy:** Redis Streams = a shared logbook in one room (fast, limited pages, one
+machine). Kafka = a replicated archive across many buildings (keeps everything,
+firehose scale, needs an ops team).
+
+**For this project (~1 frame/min):** Redis Streams already gives Kafka-like semantics
+at tiny ops cost. Kafka would be renting a distributed warehouse to store one
+notebook — it only wins at genuine firehose scale with long retention/replay.
+
+## Is Redis used in production? Yes — and what's Valkey?
+
+Redis is one of the most-used data stores in production, almost always as the **fast
+layer in front of a primary DB** (not the system of record):
+
+- **caching** (query results, API responses, sessions) — the #1 use
+- **background job queues** (Sidekiq, BullMQ, Celery/RQ)
+- **rate limiting**, leaderboards, distributed locks, pub/sub real-time
+
+Every cloud sells it managed: **AWS ElastiCache**, **Google Memorystore**, **Azure
+Cache for Redis**, **Upstash**, **Redis Cloud**.
+
+**Valkey** = the **open-source fork of Redis**. Story: Redis was BSD (open source)
+for years; in **March 2024 Redis Inc. relicensed** it to a source-available license
+(RSALv2/SSPL), which restricts cloud providers. In response the **Linux Foundation +
+AWS, Google, Oracle, Snap, Ericsson** forked the last open version into **Valkey**
+(BSD-licensed, truly open). It's a **drop-in replacement** — same RESP protocol, same
+commands, existing clients just work. AWS/Google now offer Valkey managed. Cousins:
+**KeyDB**, **Dragonfly**.
+
+**Takeaway:** the "Redis pattern" is more entrenched than ever; some teams now run
+**Valkey** for licensing reasons. Saying *"Redis or Valkey"* signals you're current.
+If the platform goes AWS (the DynamoDB thread), **ElastiCache (Redis/Valkey)** is the
+managed, no-ops way to add it.
