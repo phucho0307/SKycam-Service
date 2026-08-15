@@ -8,7 +8,7 @@ import os
 from celery import Celery
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-SCAN_INTERVAL_S = float(os.environ.get("DETECT_SCAN_INTERVAL_S", "30"))
+SCAN_INTERVAL_S = float(os.environ.get("DETECT_SCAN_INTERVAL_S", "3"))
 
 app = Celery("skycam_detect", broker=REDIS_URL, backend=REDIS_URL, include=["tasks"])
 
