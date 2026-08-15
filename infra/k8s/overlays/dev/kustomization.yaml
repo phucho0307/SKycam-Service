@@ -32,10 +32,13 @@ patches:
 images:
 - name: ghcr.io/observatoryservices/observatory-services-api
   newName: ghcr.io/observatoryservices/observatory-services-api
-  newTag: dev-c9aa4c3
+  newTag: dev-3dc3a2d
 - name: ghcr.io/observatoryservices/observatory-services-frontend
   newName: ghcr.io/observatoryservices/observatory-services-frontend
-  newTag: dev-c9aa4c3
+  newTag: dev-3dc3a2d
 - name: ghcr.io/observatoryservices/observatory-services-release-proxy
   newName: ghcr.io/observatoryservices/observatory-services-release-proxy
-  newTag: dev-c9aa4c3
+  newTag: dev-3dc3a2d
+- name: ghcr.io/observatoryservices/observatory-services-skycam
+  newName: ghcr.io/observatoryservices/observatory-services-skycam
+  newTag: dev-3dc3a2d
