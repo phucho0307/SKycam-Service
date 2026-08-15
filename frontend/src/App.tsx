@@ -10,6 +10,7 @@ import SkycamLayout from "@/routes/skycam/SkycamLayout";
 import LiveView from "@/routes/skycam/LiveView";
 import Images from "@/routes/skycam/Images";
 import Telemetry from "@/routes/skycam/Telemetry";
+import Settings from "@/routes/skycam/Settings";
 import NotFound from "@/routes/NotFound";
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
             <Route index element={<LiveView />} />
             <Route path="images" element={<Images />} />
             <Route path="telemetry" element={<Telemetry />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

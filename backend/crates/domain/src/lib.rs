@@ -125,3 +125,26 @@ pub struct Frame {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_cloudy: Option<bool>,
 }
+
+/// Per-device camera settings, edited from the GUI and fetched/applied by the Pi.
+/// Capture settings (exposure/gain) change the sensor; preview settings adjust the
+/// JPEG the GUI shows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraSettings {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub device_id: String,
+    // --- capture (applied to the ZWO sensor) ---
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gain: Option<i64>,
+    // --- preview appearance (applied when building the JPEG) ---
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_gamma: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_contrast: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_brightness: Option<f64>,
+    pub updated_at: DateTime<Utc>,
+}

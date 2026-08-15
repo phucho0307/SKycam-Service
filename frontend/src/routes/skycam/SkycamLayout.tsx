@@ -4,6 +4,7 @@ const nav = [
   { to: "/camera", label: "Live View", end: true },
   { to: "/camera/images", label: "Images", end: false },
   { to: "/camera/telemetry", label: "Telemetry", end: false },
+  { to: "/camera/settings", label: "Settings", end: false },
 ];
 
 export default function SkycamLayout() {
