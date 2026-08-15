@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchLatestFrame } from "@/lib/skycam";
+import SettingsPanel from "./SettingsPanel";
 
 function timeAgo(iso: string): string {
   const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
@@ -13,7 +14,7 @@ export default function LiveView() {
   const { data: f, isLoading, error } = useQuery({
     queryKey: ["skycam", "latest"],
     queryFn: fetchLatestFrame,
-    refetchInterval: 30_000,
+    refetchInterval: 3_000,
   });
 
   if (isLoading) return <Note>Loading latest frame…</Note>;
@@ -21,7 +22,7 @@ export default function LiveView() {
   if (!f) return <Note>No frames yet. Upload one to see it here.</Note>;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_260px]">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
       <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900/40">
         <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2 text-sm text-slate-400">
           <span>Current sky</span>
@@ -62,8 +63,9 @@ export default function LiveView() {
           </a>
         )}
         <p className="pt-1 text-xs text-slate-500">
-          Refreshes the most recent uploaded frame every 30s — not a video stream.
+          Refreshes the newest preview every ~3s — adjust settings below and watch it change.
         </p>
+        <SettingsPanel />
       </div>
     </div>
   );
