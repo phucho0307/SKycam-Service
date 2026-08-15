@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchLatestFrame } from "@/lib/skycam";
+import { fetchFrames, fetchLatestFrame } from "@/lib/skycam";
 import SettingsPanel from "./SettingsPanel";
 
 function timeAgo(iso: string): string {
@@ -16,6 +16,14 @@ export default function LiveView() {
     queryFn: fetchLatestFrame,
     refetchInterval: 3_000,
   });
+  // Cloud status changes slowly; show the most recent *scored* frame so it's
+  // never blank while the newest frame is still waiting for detection.
+  const { data: recent } = useQuery({
+    queryKey: ["skycam", "recent-scored"],
+    queryFn: () => fetchFrames(20),
+    refetchInterval: 3_000,
+  });
+  const lastScored = recent?.find((fr) => fr.is_cloudy != null);
 
   if (isLoading) return <Note>Loading latest frame…</Note>;
   if (error) return <Note>Failed to load: {String((error as Error).message)}</Note>;
@@ -46,12 +54,14 @@ export default function LiveView() {
         <Stat
           label="Sky"
           value={
-            f.is_cloudy == null
-              ? "—"
-              : (f.is_cloudy ? "Cloudy" : "Clear") +
-                (f.cloud_score != null ? ` (${Math.round(f.cloud_score * 100)}%)` : "")
+            !lastScored || lastScored.is_cloudy == null
+              ? "scoring…"
+              : (lastScored.is_cloudy ? "Cloudy" : "Clear") +
+                (lastScored.cloud_score != null
+                  ? ` (${Math.round(lastScored.cloud_score * 100)}%)`
+                  : "")
           }
-          tone={f.is_cloudy ? "warn" : "ok"}
+          tone={lastScored?.is_cloudy ? "warn" : "ok"}
         />
         <Stat label="Last capture" value={new Date(f.captured_at).toLocaleString()} />
         {f.fits_url && (
