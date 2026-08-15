@@ -7,16 +7,19 @@ export interface Frame {
   captured_at: string; // ISO
   received_at: string; // ISO
   temperature_c?: number | null;
+  probe_temp_c?: number | null;
+  cloud_score?: number | null;
   is_cloudy?: boolean | null;
-  size_bytes: number;
+  size_bytes?: number | null;
   preview_url?: string | null; // presigned, browser-reachable
-  fits_url?: string | null; // presigned download
+  fits_url?: string | null; // presigned download (only on full frames)
 }
 
 export interface Reading {
   recorded_at: string; // ISO
   temperature_c?: number | null;
   humidity_pct?: number | null;
+  probe_temp_c?: number | null;
 }
 
 export const DEVICE_ID = "skycam";

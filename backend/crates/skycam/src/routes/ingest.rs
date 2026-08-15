@@ -57,6 +57,7 @@ pub struct TelemetryInput {
     recorded_at: Option<DateTime<Utc>>,
     temperature_c: Option<f64>,
     humidity_pct: Option<f64>,
+    probe_temp_c: Option<f64>,
 }
 
 #[post("/telemetry", format = "json", data = "<input>")]
@@ -73,6 +74,7 @@ pub async fn telemetry(
         received_at: now,
         temperature_c: input.temperature_c,
         humidity_pct: input.humidity_pct,
+        probe_temp_c: input.probe_temp_c,
     };
 
     let res = db
@@ -104,12 +106,14 @@ pub struct FrameUpload<'r> {
     /// ISO-8601 capture time; defaults to server time if omitted.
     captured_at: Option<String>,
     temperature_c: Option<f64>,
+    probe_temp_c: Option<f64>,
     exposure_ms: Option<f64>,
     gain: Option<i64>,
     /// Optional explicit extension for the object key (e.g. "fits", "jpg").
     ext: Option<String>,
-    /// The full-resolution frame (e.g. FITS).
-    file: TempFile<'r>,
+    /// The full-resolution frame (e.g. FITS). Optional — a lightweight
+    /// preview-only frame (sent frequently for detection) omits it.
+    file: Option<TempFile<'r>>,
     /// Optional small web-viewable JPEG preview.
     preview: Option<TempFile<'r>>,
 }
@@ -142,6 +146,11 @@ pub async fn frames(
     storage: &State<Storage>,
     mut upload: Form<FrameUpload<'_>>,
 ) -> Result<Json<Ack>, Status> {
+    // A frame must carry at least a FITS or a preview.
+    if upload.file.is_none() && upload.preview.is_none() {
+        return Err(Status::BadRequest);
+    }
+
     let now = Utc::now();
     let captured_at = upload
         .captured_at
@@ -152,43 +161,46 @@ pub async fn frames(
 
     let device = upload.device_id.clone();
     let ts = captured_at.format("%Y%m%dT%H%M%SZ").to_string();
-
-    let content_type = upload
-        .file
-        .content_type()
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| "application/octet-stream".to_string());
-    let size_bytes = upload.file.len();
-    let ext = upload
-        .ext
-        .clone()
-        .or_else(|| {
-            upload
-                .file
-                .content_type()
-                .and_then(|c| c.extension().map(|e| e.as_str().to_string()))
-        })
-        .unwrap_or_else(|| "bin".to_string());
-
     // One id shared by the object keys and the Mongo document.
     let oid = bson::oid::ObjectId::new();
-    let key = format!("frames/{}/{}-{}.{}", device, ts, oid.to_hex(), ext);
 
-    // Full frame first.
-    upload_part(
-        storage,
-        &mut upload.file,
-        &key,
-        &content_type,
-        &format!("frame-{}", oid.to_hex()),
-    )
-    .await?;
+    // Full FITS (optional — absent on lightweight preview-only frames).
+    let mut s3_key: Option<String> = None;
+    let mut content_type: Option<String> = None;
+    let mut size_bytes: Option<u64> = None;
+    if upload.file.is_some() {
+        let ct = upload
+            .file
+            .as_ref()
+            .and_then(|f| f.content_type())
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let sz = upload.file.as_ref().map(|f| f.len()).unwrap_or(0);
+        let ext = upload
+            .ext
+            .clone()
+            .or_else(|| {
+                upload
+                    .file
+                    .as_ref()
+                    .and_then(|f| f.content_type())
+                    .and_then(|c| c.extension().map(|e| e.as_str().to_string()))
+            })
+            .unwrap_or_else(|| "bin".to_string());
+        let key = format!("frames/{}/{}-{}.{}", device, ts, oid.to_hex(), ext);
+        let part = upload.file.as_mut().unwrap();
+        upload_part(storage, part, &key, &ct, &format!("frame-{}", oid.to_hex())).await?;
+        s3_key = Some(key);
+        content_type = Some(ct);
+        size_bytes = Some(sz);
+    }
 
-    // Optional preview.
+    // JPEG preview (optional).
     let preview_key = if upload.preview.is_some() {
         let pkey = format!("previews/{}/{}-{}.jpg", device, ts, oid.to_hex());
         let part = upload.preview.as_mut().unwrap();
-        upload_part(storage, part, &pkey, "image/jpeg", &format!("preview-{}", oid.to_hex())).await?;
+        upload_part(storage, part, &pkey, "image/jpeg", &format!("preview-{}", oid.to_hex()))
+            .await?;
         Some(pkey)
     } else {
         None
@@ -199,13 +211,16 @@ pub async fn frames(
         device_id: device,
         captured_at,
         received_at: now,
-        s3_key: key,
+        s3_key,
         preview_key,
         content_type,
         size_bytes,
         temperature_c: upload.temperature_c,
+        probe_temp_c: upload.probe_temp_c,
         exposure_ms: upload.exposure_ms,
         gain: upload.gain,
+        cloud_score: None,
+        is_cloudy: None,
     };
 
     db.database

@@ -24,11 +24,13 @@ pub struct FrameDto {
     captured_at: String,
     received_at: String,
     temperature_c: Option<f64>,
+    probe_temp_c: Option<f64>,
+    cloud_score: Option<f64>,
     is_cloudy: Option<bool>,
-    size_bytes: u64,
+    size_bytes: Option<u64>,
     /// Presigned, browser-reachable URL to the JPEG preview (if any).
     preview_url: Option<String>,
-    /// Presigned URL to download the full FITS.
+    /// Presigned URL to download the full FITS (if this frame has one).
     fits_url: Option<String>,
 }
 
@@ -37,6 +39,7 @@ pub struct ReadingDto {
     recorded_at: String,
     temperature_c: Option<f64>,
     humidity_pct: Option<f64>,
+    probe_temp_c: Option<f64>,
 }
 
 async fn frame_to_dto(f: Frame, storage: Option<&Storage>) -> FrameDto {
@@ -46,7 +49,10 @@ async fn frame_to_dto(f: Frame, storage: Option<&Storage>) -> FrameDto {
                 Some(k) => s.presign_get(k, URL_TTL).await.ok(),
                 None => None,
             };
-            let fits = s.presign_get(&f.s3_key, URL_TTL).await.ok();
+            let fits = match &f.s3_key {
+                Some(k) => s.presign_get(k, URL_TTL).await.ok(),
+                None => None,
+            };
             (preview, fits)
         }
         None => (None, None),
@@ -57,7 +63,9 @@ async fn frame_to_dto(f: Frame, storage: Option<&Storage>) -> FrameDto {
         captured_at: f.captured_at.to_rfc3339(),
         received_at: f.received_at.to_rfc3339(),
         temperature_c: f.temperature_c,
-        is_cloudy: None, // set once cloud detection exists
+        probe_temp_c: f.probe_temp_c,
+        cloud_score: f.cloud_score,
+        is_cloudy: f.is_cloudy,
         size_bytes: f.size_bytes,
         preview_url,
         fits_url,
@@ -184,6 +192,7 @@ pub async fn telemetry_list(
             recorded_at: r.recorded_at.to_rfc3339(),
             temperature_c: r.temperature_c,
             humidity_pct: r.humidity_pct,
+            probe_temp_c: r.probe_temp_c,
         })
         .collect();
     Ok(Json(out))

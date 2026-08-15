@@ -85,6 +85,9 @@ pub struct TelemetryReading {
     pub temperature_c: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub humidity_pct: Option<f64>,
+    /// External/probe temperature (DS18B20 outside the enclosure).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_temp_c: Option<f64>,
 }
 
 /// Metadata for one captured camera frame. The image bytes live in object storage
@@ -96,18 +99,29 @@ pub struct Frame {
     pub device_id: String,
     pub captured_at: DateTime<Utc>,
     pub received_at: DateTime<Utc>,
-    /// Object key of the full FITS in the bucket (bytes are not stored in Mongo).
-    pub s3_key: String,
+    /// Object key of the full FITS (absent on lightweight preview-only frames).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_key: Option<String>,
     /// Object key of the small web-viewable JPEG preview, if the device sent one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_key: Option<String>,
-    pub content_type: String,
-    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
     /// Environmental / capture metadata stamped onto the frame at capture time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature_c: Option<f64>,
+    /// External/probe temperature (DS18B20 outside the enclosure).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_temp_c: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exposure_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gain: Option<i64>,
+    /// Cloud-detection results (written by the detect worker).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_cloudy: Option<bool>,
 }

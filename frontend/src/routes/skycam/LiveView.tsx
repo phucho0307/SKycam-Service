@@ -40,10 +40,16 @@ export default function LiveView() {
       </div>
 
       <div className="space-y-3">
-        <Stat label="Temperature" value={f.temperature_c != null ? `${f.temperature_c} °C` : "—"} />
+        <Stat label="Temperature (box)" value={f.temperature_c != null ? `${f.temperature_c} °C` : "—"} />
+        <Stat label="Probe (outside)" value={f.probe_temp_c != null ? `${f.probe_temp_c} °C` : "—"} />
         <Stat
           label="Sky"
-          value={f.is_cloudy == null ? "—" : f.is_cloudy ? "Cloudy" : "Clear"}
+          value={
+            f.is_cloudy == null
+              ? "—"
+              : (f.is_cloudy ? "Cloudy" : "Clear") +
+                (f.cloud_score != null ? ` (${Math.round(f.cloud_score * 100)}%)` : "")
+          }
           tone={f.is_cloudy ? "warn" : "ok"}
         />
         <Stat label="Last capture" value={new Date(f.captured_at).toLocaleString()} />

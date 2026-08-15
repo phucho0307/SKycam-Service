@@ -1,0 +1,6 @@
+celery[redis]
+redis
+pymongo
+boto3
+opencv-python-headless
+numpy
