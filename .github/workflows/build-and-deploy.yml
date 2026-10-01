@@ -7,6 +7,12 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
+      # The Go/gRPC stack. Without these, a change to the ingest service or its
+      # contract would merge and never build.
+      - "services/**"
+      - "proto/**"
+      - "detect/**"
+      - "notify/**"
       - ".github/workflows/build-and-deploy.yml"
 
 concurrency:
@@ -60,6 +66,18 @@ jobs:
             context: frontend
             dockerfile: frontend/Dockerfile
             build_args: ""
+          - name: ingest
+            context: services/ingest
+            dockerfile: services/ingest/Dockerfile
+            build_args: ""
+          - name: detect
+            context: detect
+            dockerfile: detect/Dockerfile
+            build_args: ""
+          - name: notify
+            context: notify
+            dockerfile: notify/Dockerfile
+            build_args: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -105,7 +123,7 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-api=${{ env.IMAGE_PREFIX }}-api:${{ needs.resolve.outputs.tag }} \
             ${{ env.IMAGE_PREFIX }}-skycam=${{ env.IMAGE_PREFIX }}-skycam:${{ needs.resolve.outputs.tag }} \
             ${{ env.IMAGE_PREFIX }}-release-proxy=${{ env.IMAGE_PREFIX }}-release-proxy:${{ needs.resolve.outputs.tag }} \
-            ${{ env.IMAGE_PREFIX }}-frontend=${{ env.IMAGE_PREFIX }}-frontend:${{ needs.resolve.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}-frontend=${{ env.IMAGE_PREFIX }}-frontend:${{ needs.resolve.outputs.tag }}             ${{ env.IMAGE_PREFIX }}-ingest=${{ env.IMAGE_PREFIX }}-ingest:${{ needs.resolve.outputs.tag }}             ${{ env.IMAGE_PREFIX }}-detect=${{ env.IMAGE_PREFIX }}-detect:${{ needs.resolve.outputs.tag }}             ${{ env.IMAGE_PREFIX }}-notify=${{ env.IMAGE_PREFIX }}-notify:${{ needs.resolve.outputs.tag }}
 
       - name: Commit and push
         run: |

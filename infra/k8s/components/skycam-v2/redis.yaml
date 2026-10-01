@@ -1,0 +1,74 @@
+# Redis: Celery broker for detect and notify, plus the ingest service's
+# cross-replica state (session presence, command pub/sub, rate-limit buckets,
+# in-flight sign-ins).
+#
+# No persistence, deliberately. Everything durable lives in Postgres: a frame's
+# detection state and an alert's delivery state are rows, and both apps
+# re-derive their work from those rows on the next Beat tick. Losing Redis loses
+# nothing that is not rebuilt within a minute. Buckets restart full and in-flight
+# sign-ins must be retried, which is the accepted cost.
+#
+# noeviction, not an LRU policy: when memory is full, writes fail loudly. Under
+# LRU Redis would silently drop a queued task or a device's presence key, and the
+# symptom would be a camera that "sometimes" ignores commands.
+#
+# Separate databases per app (see the REDIS_URLs): detect=0, notify=1, ingest=2.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  # Two Redis pods would be two independent brokers, each holding half the
+  # queue. Recreate guarantees there is never more than one.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args:
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 200mb
+            - --maxmemory-policy
+            - noeviction
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              memory: "256Mi"

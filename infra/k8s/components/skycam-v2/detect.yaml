@@ -1,0 +1,124 @@
+# Cloud detection, Postgres pipeline (DETECT_BACKEND=postgres, fed by Go ingest).
+#
+# Worker and Beat are separate Deployments: workers scale with frame volume,
+# Beat stays at one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detect-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: detect-worker
+  template:
+    metadata:
+      labels:
+        app: detect-worker
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/observatoryservices/observatory-services-detect:latest
+          command: ["celery", "-A", "celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+          env:
+            - name: DETECT_BACKEND
+              value: postgres
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: postgres_password
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@postgres:5432/skycam
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_endpoint
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_bucket
+            - name: S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_region
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: s3_access_key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: s3_secret_key
+          # Asks this worker, by name, to answer over the broker. Proves the
+          # process is alive *and* consuming, which a PID check would not.
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "celery -A celery_app inspect ping -d celery@$HOSTNAME --timeout 10"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              # OpenCV decodes each preview in memory, per concurrent task.
+              memory: "768Mi"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detect-beat
+spec:
+  replicas: 1
+  # Beat is a singleton; Recreate never runs two during a rollout. (Two would
+  # be harmless -- claim_pending uses SKIP LOCKED, so a duplicate tick finds
+  # nothing -- but there is no reason to rely on that.)
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: detect-beat
+  template:
+    metadata:
+      labels:
+        app: detect-beat
+    spec:
+      containers:
+        - name: beat
+          image: ghcr.io/observatoryservices/observatory-services-detect:latest
+          # The schedule file is scratch state; /tmp because the image's
+          # working directory is not writable by the app user.
+          command: ["celery", "-A", "celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+          env:
+            - name: DETECT_BACKEND
+              value: postgres
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: postgres_password
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@postgres:5432/skycam
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "96Mi"
+            limits:
+              memory: "192Mi"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false

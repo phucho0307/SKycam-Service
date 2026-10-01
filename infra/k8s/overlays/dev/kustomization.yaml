@@ -10,6 +10,13 @@ resources:
 - release-proxy-secrets.sealed.yaml
 - github-app-credentials.sealed.yaml
 
+# The Go/gRPC skycam stack. Dev only until verified; promote by adding the same
+# line to release, then prod. Needs the skycam-v2-secrets Sealed Secret in this
+# namespace (see components/skycam-v2/README.md) -- until it exists the new pods
+# sit in CreateContainerConfigError and nothing else is affected.
+components:
+- ../../components/skycam-v2
+
 configMapGenerator:
 - literals:
   - environment=dev

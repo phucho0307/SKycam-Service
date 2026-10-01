@@ -1,0 +1,137 @@
+name: skycam-ci
+
+# Tests for the Go/gRPC ingest service and the two Celery apps, against real
+# Postgres, Redis and MinIO. Every integration test in these suites talks to the
+# real thing; none are mocked, so CI has to provide them.
+
+on:
+  push:
+    branches: [main, release, dev]
+    paths:
+      - "services/**"
+      - "proto/**"
+      - "detect/**"
+      - "notify/**"
+      - ".github/workflows/skycam-ci.yml"
+  pull_request:
+    paths:
+      - "services/**"
+      - "proto/**"
+      - "detect/**"
+      - "notify/**"
+      - ".github/workflows/skycam-ci.yml"
+
+env:
+  PG: postgres://postgres:postgres@localhost:5432
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ingest_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # A service container cannot be given a command, and MinIO needs one.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/ready && break
+            sleep 1
+          done
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/ingest/go.mod
+          cache-dependency-path: services/ingest/go.sum
+
+      - name: Go vet
+        working-directory: services/ingest
+        run: go vet ./...
+
+      # The generated code is committed, so a .proto edited without
+      # regenerating would ship a contract the code does not implement.
+      # Plugin versions pinned to the ones in the committed files' headers, so
+      # the diff below is about the contract and not the generator version.
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: Generated code matches the .proto
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          buf generate
+          git diff --exit-code -- services/ingest/gen || {
+            echo "::error::services/ingest/gen is stale; run 'buf generate' and commit"; exit 1; }
+
+      # -race needs cgo, which the runner has and the dev laptop does not.
+      # The load tests are skipped under -race (5-10x memory) and run below
+      # without it.
+      - name: Go tests (race detector)
+        working-directory: services/ingest
+        env:
+          INGEST_TEST_DATABASE_URL: ${{ env.PG }}/ingest_test?sslmode=disable
+          INGEST_TEST_S3_ENDPOINT: http://localhost:9000
+          INGEST_TEST_REDIS_URL: redis://localhost:6379/13
+        run: go test -race -count=1 -p=1 -skip UnderLoad ./...
+
+      - name: Go load tests (100 and 500 users)
+        working-directory: services/ingest
+        env:
+          INGEST_TEST_DATABASE_URL: ${{ env.PG }}/ingest_test?sslmode=disable
+          INGEST_TEST_S3_ENDPOINT: http://localhost:9000
+          INGEST_TEST_POOL_MAX_CONNS: "32"
+        run: go test -count=1 -run UnderLoad ./internal/server/
+
+      # The Python apps are clients of the Go service's schema, so their test
+      # databases are created by the same migrations that run in production.
+      - name: Create and migrate the Python test databases
+        working-directory: services/ingest
+        run: |
+          go build -o /tmp/ingest ./cmd/ingest
+          for db in skycam_detect_test skycam_notify_test; do
+            psql "$PG/postgres" -c "CREATE DATABASE $db"
+            DATABASE_URL="$PG/$db?sslmode=disable" /tmp/ingest migrate
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: detect tests
+        working-directory: detect
+        env:
+          DETECT_TEST_DATABASE_URL: ${{ env.PG }}/skycam_detect_test
+          DETECT_TEST_REDIS_URL: redis://localhost:6379/15
+          S3_ENDPOINT: http://localhost:9000
+          S3_BUCKET: skycam-demo
+        run: |
+          pip install -r requirements.txt
+          python -c "import boto3; boto3.client('s3', endpoint_url='http://localhost:9000', aws_access_key_id='minioadmin', aws_secret_access_key='minioadmin', region_name='us-east-1').create_bucket(Bucket='skycam-demo')"
+          pytest -q
+
+      - name: notify tests
+        working-directory: notify
+        env:
+          NOTIFY_TEST_DATABASE_URL: ${{ env.PG }}/skycam_notify_test
+          NOTIFY_TEST_REDIS_URL: redis://localhost:6379/14
+        run: |
+          pip install -r requirements.txt
+          pytest -q

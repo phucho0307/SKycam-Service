@@ -1,0 +1,115 @@
+# Rain alerts. Its own queue (-Q notify) and its own Redis database, so a
+# detection backlog can never sit in front of a time-critical alert.
+#
+# SMTP settings are optional so the worker starts before mail is configured.
+# Until then deliveries fail and are retried up to NOTIFY_MAX_DELIVERY_ATTEMPTS,
+# visible in notification_deliveries. SES must leave sandbox before this can
+# mail real users (see SCALING.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notify-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notify-worker
+  template:
+    metadata:
+      labels:
+        app: notify-worker
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/observatoryservices/observatory-services-notify:latest
+          command: ["celery", "-A", "celery_app", "worker", "-Q", "notify", "--loglevel=info", "--concurrency=2"]
+          env:
+            - name: REDIS_URL
+              value: redis://redis:6379/1
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: postgres_password
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@postgres:5432/skycam
+            - name: NOTIFY_SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: smtp_host
+                  optional: true
+            - name: NOTIFY_SMTP_PORT
+              value: "587"
+            - name: NOTIFY_SMTP_TLS
+              value: "true"
+            - name: NOTIFY_SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: smtp_user
+                  optional: true
+            - name: NOTIFY_SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: smtp_pass
+                  optional: true
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "celery -A celery_app inspect ping -d celery@$HOSTNAME --timeout 10"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 20
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notify-beat
+spec:
+  replicas: 1
+  # Singleton. The real schedule is forecast_sites.next_poll_at in Postgres,
+  # claimed with SKIP LOCKED, so a duplicate Beat would be a no-op, not a
+  # double alert -- but Recreate still keeps it to one.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: notify-beat
+  template:
+    metadata:
+      labels:
+        app: notify-beat
+    spec:
+      containers:
+        - name: beat
+          image: ghcr.io/observatoryservices/observatory-services-notify:latest
+          command: ["celery", "-A", "celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+          env:
+            - name: REDIS_URL
+              value: redis://redis:6379/1
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: postgres_password
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@postgres:5432/skycam
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "96Mi"
+            limits:
+              memory: "192Mi"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false

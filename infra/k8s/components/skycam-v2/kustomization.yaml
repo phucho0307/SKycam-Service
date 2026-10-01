@@ -1,0 +1,13 @@
+# The new skycam stack: Go/gRPC ingest, Postgres, Redis, and the detect and
+# notify Celery apps. A Component rather than part of base/, so an overlay opts
+# in -- dev first, then release, then prod, the same promotion path as code.
+# Adding it to base would deploy it to every environment at once.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - postgres.yaml
+  - redis.yaml
+  - ingest.yaml
+  - detect.yaml
+  - notify.yaml

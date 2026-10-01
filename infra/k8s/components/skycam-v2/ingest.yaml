@@ -1,0 +1,159 @@
+# Go/gRPC ingest. Two replicas, which is only correct because session presence,
+# commands, rate-limit buckets and sign-in flows are all shared through Redis
+# (INGEST_REDIS_URL). Without Redis this must be replicas: 1.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingest
+spec:
+  selector:
+    app: ingest
+  ports:
+    # h2c: plaintext HTTP/2 inside the cluster. TLS ends at Cloudflare's edge
+    # (tunnel mode), the same as every other service here.
+    - name: grpc
+      port: 9090
+      targetPort: 9090
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ingest
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never below full strength during a deploy: a camera whose pod is being
+      # replaced reconnects to the other one, and there must be one to go to.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: ingest
+    spec:
+      # Long enough for in-flight uploads to finish their current part. An
+      # interrupted upload resumes from S3's part list anyway, so this is a
+      # courtesy, not a correctness requirement.
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        # Migrations run before the server starts, with only the database
+        # credentials. golang-migrate takes a Postgres advisory lock, so two
+        # pods starting together serialise rather than race.
+        - name: migrate
+          image: ghcr.io/observatoryservices/observatory-services-ingest:latest
+          args: ["migrate"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: postgres_password
+            - name: DATABASE_URL
+              value: postgres://skycam:$(POSTGRES_PASSWORD)@postgres:5432/skycam?sslmode=disable
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      containers:
+        - name: ingest
+          image: ghcr.io/observatoryservices/observatory-services-ingest:latest
+          ports:
+            - name: grpc
+              containerPort: 9090
+          env:
+            - name: INGEST_GRPC_ADDR
+              value: ":9090"
+            # The control API stays on loopback: nothing outside this pod can
+            # reach it. How the Rust API reaches it is an open integration item.
+            - name: INGEST_CONTROL_ADDR
+              value: "127.0.0.1:9091"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: postgres_password
+            - name: DATABASE_URL
+              value: postgres://skycam:$(POSTGRES_PASSWORD)@postgres:5432/skycam?sslmode=disable
+            - name: INGEST_REDIS_URL
+              value: redis://redis:6379/2
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_endpoint
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_bucket
+            - name: S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: s3_region
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: s3_access_key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: s3_secret_key
+            - name: INGEST_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: operator_token
+            # Public keys only, never the private one. Optional until the api
+            # crate issues tokens.
+            - name: INGEST_JWT_PUBLIC_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: jwt_public_keys
+                  optional: true
+          # Native gRPC probes against grpc.health.v1. On SIGTERM the server
+          # reports NOT_SERVING first, so readiness pulls the pod out of the
+          # Service before its listeners close.
+          readinessProbe:
+            grpc:
+              port: 9090
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            grpc:
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              # Upload parts are buffered in memory (5MB per active upload),
+              # so this also caps concurrent uploads per pod.
+              memory: "512Mi"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+---
+# Voluntary disruptions (node drain, cluster upgrade) must leave one replica,
+# or every camera disconnects at once.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ingest
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ingest
