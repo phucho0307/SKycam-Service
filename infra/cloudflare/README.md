@@ -2,6 +2,31 @@
 
 Two modes — pick the one matching where the VPS lives.
 
+## gRPC needs extra setup (tested 2026-09-27)
+
+The Go ingest service (`services/ingest/`) speaks gRPC, and **Cloudflare blocks gRPC at the
+edge by default**. Measured: two requests differing only in `Content-Type` —
+`application/grpc` got a **403 from Cloudflare** without reaching the origin, while
+`application/octet-stream` reached it (502). Before pointing a camera at a Cloudflare
+hostname:
+
+1. **Zone → Network → gRPC: on.** Not on by default. Without it, every RPC is a 403.
+2. **A dedicated Public Hostname** (e.g. `ingest.dev.observatory.services`). gRPC paths look
+   like `/skycam.v1.SkycamService/UploadFrame`, which does not match the `/skycam/` Prefix
+   rule in `infra/k8s/base/ingress.yaml` — it falls through to `/` and hits the *frontend*.
+3. **cloudflared needs `http2Origin: true`** for the gRPC hostname (the `--http2-origin`
+   flag in `--url` mode). The existing tunnel targets Traefik over HTTP/1.1, which cannot
+   carry gRPC.
+4. **Traefik: give gRPC its own entryPoint with `respondingTimeouts.readTimeout: 0`.**
+   Traefik v3 defaults it to 60s and a long-lived stream is a single request, so the
+   `DeviceSession` is reset at exactly 60 seconds, repeatedly. With the timeout disabled the
+   same stream held 5 minutes with no drops. Do **not** disable it on the browser-facing
+   entrypoint — an unlimited read timeout there invites slowloris.
+
+**Still unverified:** whether Cloudflare's proxy carries *client-streaming* and
+*bidirectional* gRPC, and for how long, even with the zone setting on. If it does not,
+Mode B removes Cloudflare from the data path.
+
 ## Mode A — Cloudflare Tunnel (current: VPS behind NAT)
 
 All inbound traffic enters via an outbound-initiated cloudflared connection from inside the cluster. No public IP, no port forwarding, no Origin Cert.

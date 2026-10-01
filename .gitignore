@@ -35,3 +35,13 @@ build/
 
 # K8s rendered output
 infra/k8s/_rendered/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+celerybeat-schedule*
+
+# fake-pi spool (frames waiting to upload)
+tools/fake-pi/spool/

@@ -140,9 +140,12 @@ table). Data via react-query; Vite proxies `/skycam` → the service.
     idempotent retries, but not time-sortable) vs hybrid (timestamp path + stored
     `sha256`). Recommended hybrid; deferred.
 
-12. **Cloud detection deferred, planned as a separate Go microservice** (polyglot
-    services are fine in a microservices setup; a deliberate divergence from the
-    Rust-only convention).
+12. **Cloud detection built in Python, not Go.** The plan said a Go microservice; the
+    decision changed once the work started, because the detector is OpenCV and NumPy
+    and the queue is Celery — both Python-native. Go did enter the project, but for
+    the ingest service, where the problem is connection lifecycle rather than image
+    maths. Polyglot was the right call; the split just landed along a different line
+    than first drafted.
 
 ## 7. The Pi client (`Skycam---Pi` repo)
 
@@ -219,18 +222,19 @@ a slow rebuild, and fixing one root cause at a time.
 | Real Pi hardware capture | ✅ validated end-to-end (via cloudflared tunnel) |
 | Deploy to `dev.observatory.services` | ✅ pushed to `dev`, CI/CD deploying |
 | dev ingest accepting data | ⏳ needs `skycam-secrets` Sealed Secret (cluster access) |
-| Cloud detection (Go service) | ⏳ deferred |
+| Cloud detection (Python + Celery + Redis) | ✅ built, laptop-only — no Dockerfile, not in any cluster; no retries/DLQ yet |
+| Go/gRPC ingest service + Postgres | ✅ built + tested locally (M1–M6), not deployed — see `GO_GRPC_AND_POSTGRES.md` |
+| `telemetry` → DynamoDB | ✅ migrated + verified against DynamoDB Local — see `DYNAMODB_TELEMETRY_MIGRATION.md` |
 | Image id = UUID/hash | ⏳ deferred |
 
 ## 11. What's next
 
 1. Create the **`skycam-secrets`** Sealed Secret (token + S3 keys) so dev ingest
    goes live end-to-end.
-2. **Cloud detection** as a separate **Go** microservice + alarms + an Alarms page —
-   the concrete next feature (likely the first *async* workload).
-3. Under consideration (see roadmap notes): a **broker** (Redis / Kafka) to run
-   detection & data products async; **keograms / timelapse**; a possible **DynamoDB**
-   migration (business-driven).
+2. **Deploy the detection worker** — it exists (Python + Celery + Redis) but runs only
+   on a laptop, and needs retries, a DLQ and idempotent alarm writes first.
+3. **Point the Pi at the Go/gRPC service** (M7) and prove gRPC survives Cloudflare
+   Tunnel → Traefik (M0). **Keograms / timelapse** still unstarted.
 4. Image-id scheme (hybrid timestamp + `sha256`); live preview over WebSocket;
    presigned *uploads* if body-size limits bite.
 
