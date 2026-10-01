@@ -1,0 +1,4 @@
+# fake-pi client. grpcio-tools is only needed to regenerate gen/ from the proto.
+grpcio>=1.60
+grpcio-tools>=1.60
+pillow>=10.0
