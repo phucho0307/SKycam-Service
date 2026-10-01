@@ -1,6 +1,8 @@
 celery[redis]
 redis
 pymongo
+psycopg[binary,pool]
 boto3
 opencv-python-headless
 numpy
+pytest
