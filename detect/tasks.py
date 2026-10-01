@@ -73,13 +73,19 @@ def detect_frame(frame_id: str):
         }},
     )
     if result["is_cloudy"]:
-        _db.alarms.insert_one({
-            "device_id": doc.get("device_id"),
-            "kind": "cloud",
-            "frame_id": doc["_id"],
-            "score": result["cloud_score"],
-            "created_at": datetime.now(timezone.utc),
-            "acknowledged": False,
-        })
+        # Upsert on (frame_id, kind), matching the unique index the skycam service
+        # creates. A plain insert_one would raise DuplicateKeyError when
+        # task_acks_late redelivers a task whose worker died after this line.
+        # $setOnInsert keeps the first alarm untouched on a replay.
+        _db.alarms.update_one(
+            {"frame_id": doc["_id"], "kind": "cloud"},
+            {"$setOnInsert": {
+                "device_id": doc.get("device_id"),
+                "score": result["cloud_score"],
+                "created_at": datetime.now(timezone.utc),
+                "acknowledged": False,
+            }},
+            upsert=True,
+        )
 
     return {"frame_id": frame_id, **result}

@@ -50,7 +50,6 @@ name = "api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "aws-sdk-s3",
  "bson",
  "chrono",
  "domain",
@@ -3260,6 +3259,26 @@ dependencies = [
  "num-traits",
  "thiserror",
  "time",
+]
+
+[[package]]
+name = "skycam"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-sdk-s3",
+ "bson",
+ "chrono",
+ "domain",
+ "futures",
+ "mongodb",
+ "rocket",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
