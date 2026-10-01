@@ -1,0 +1,12 @@
+version: v2
+# Go server + client stubs for services/ingest. Uses locally installed plugins:
+#   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+#   go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+# Python stubs for the Pi are generated separately: see proto/gen-python.sh.
+plugins:
+  - local: protoc-gen-go
+    out: services/ingest/gen
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: services/ingest/gen
+    opt: paths=source_relative

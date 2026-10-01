@@ -1,0 +1,222 @@
+// Contract between sky-camera devices and the ingest service.
+//
+// Design notes live in GO_GRPC_AND_POSTGRES.md. The short version:
+//   - DeviceSession is the long-lived control plane (small messages, both ways).
+//   - UploadFrame is the data plane: one call per frame, FITS sent in chunks.
+//     Frames are NOT sent on DeviceSession, because messages within one stream
+//     are ordered and a 25MB frame would block commands queued behind it.
+//   - Uploads are resumable: GetUploadStatus says how many FITS bytes are
+//     durably stored, and the client resumes UploadFrame from that offset.
+//
+// Field numbers are permanent. Never reuse or renumber one; reserve it instead.
+syntax = "proto3";
+
+package skycam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ObservatoryServices/ObservatoryServices/services/ingest/gen/skycam/v1;skycamv1";
+
+// Device-facing API. Reachable from the public ingest hostname.
+service SkycamService {
+  // Opened once by the device and held open. Device sends hello, telemetry and
+  // heartbeats; the server sends settings and commands.
+  rpc DeviceSession(stream DeviceSessionRequest) returns (stream DeviceSessionResponse);
+
+  // Uploads one frame. The first message must be a FrameHeader; any following
+  // messages are FitsChunks, in order, starting at the offset reported by
+  // GetUploadStatus (0 for a new upload).
+  rpc UploadFrame(stream UploadFrameRequest) returns (UploadFrameResponse);
+
+  // Reports how much of a frame is durably stored, so an interrupted upload can
+  // resume instead of restarting.
+  rpc GetUploadStatus(GetUploadStatusRequest) returns (GetUploadStatusResponse);
+}
+
+// Operator-facing API. Not exposed through the public ingest host.
+service SkycamControlService {
+  // Stores new settings and, if the device is connected, pushes them down its
+  // DeviceSession. Otherwise they are delivered when it next connects.
+  rpc UpdateDeviceSettings(UpdateDeviceSettingsRequest) returns (UpdateDeviceSettingsResponse);
+
+  // Sends a command to a connected device. Commands are not stored: they only
+  // make sense right now, so a disconnected device is an error, not a queue.
+  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
+
+  // Which devices currently hold an open DeviceSession on this server.
+  rpc ListConnectedDevices(ListConnectedDevicesRequest) returns (ListConnectedDevicesResponse);
+}
+
+// ---- UploadFrame ------------------------------------------------------------
+
+message UploadFrameRequest {
+  oneof payload {
+    FrameHeader header = 1;
+    FitsChunk chunk = 2;
+  }
+}
+
+message FrameHeader {
+  // Client-generated UUID. It is the idempotency key: re-sending a frame that
+  // was already stored is a no-op, and it keys the resumable FITS upload.
+  string frame_id = 1;
+  // TODO(M5): derive from the device's auth token instead of trusting this.
+  string device_id = 2;
+  google.protobuf.Timestamp captured_at = 3;
+  optional double temperature_c = 4;
+  optional double probe_temp_c = 5;
+  // Small JPEG preview, sent inline. Empty if the device didn't make one.
+  bytes preview_jpeg = 6;
+  // Present only when this frame includes a full FITS.
+  FitsInfo fits = 7;
+}
+
+message FitsInfo {
+  uint64 size_bytes = 1;
+  // SHA-256 of the complete FITS file (32 bytes). Verified before the frame is
+  // committed, so a corrupted or mis-assembled upload is never stored.
+  bytes sha256 = 2;
+}
+
+message FitsChunk {
+  // Byte offset of data[0] within the FITS file.
+  uint64 offset = 1;
+  // Keep chunks well under gRPC's 4MB default message limit (256KB-1MB).
+  bytes data = 2;
+}
+
+message UploadFrameResponse {
+  string frame_id = 1;
+  // True if this frame had already been stored by an earlier call.
+  bool duplicate = 2;
+}
+
+// ---- GetUploadStatus ----------------------------------------------------------
+
+message GetUploadStatusRequest {
+  string frame_id = 1;
+  string device_id = 2;
+}
+
+message GetUploadStatusResponse {
+  UploadState state = 1;
+  // Resume UploadFrame from this FITS offset. Always a part boundary.
+  uint64 committed_bytes = 2;
+}
+
+enum UploadState {
+  UPLOAD_STATE_UNSPECIFIED = 0;
+  // Nothing stored yet: start from offset 0.
+  UPLOAD_STATE_NOT_FOUND = 1;
+  // Some FITS parts are stored: resume from committed_bytes.
+  UPLOAD_STATE_IN_PROGRESS = 2;
+  // The frame is fully stored: do not upload again.
+  UPLOAD_STATE_COMPLETE = 3;
+}
+
+// ---- DeviceSession ------------------------------------------------------------
+
+message DeviceSessionRequest {
+  oneof msg {
+    // Must be the first message on the stream.
+    Hello hello = 1;
+    Telemetry telemetry = 2;
+    Heartbeat heartbeat = 3;
+    CommandAck command_ack = 4;
+  }
+}
+
+message DeviceSessionResponse {
+  oneof msg {
+    DeviceSettings settings = 1;
+    Command command = 2;
+  }
+}
+
+message Hello {
+  // TODO(M5): derive from the device's auth token instead of trusting this.
+  string device_id = 1;
+  string client_version = 2;
+}
+
+message Telemetry {
+  google.protobuf.Timestamp recorded_at = 1;
+  optional double temperature_c = 2;
+  optional double humidity_pct = 3;
+  optional double probe_temp_c = 4;
+}
+
+// Application-level liveness signal. Sent every ~20-30s so a dead connection is
+// detected even if HTTP/2 PINGs don't survive intermediate proxies.
+message Heartbeat {
+  google.protobuf.Timestamp sent_at = 1;
+}
+
+message Command {
+  string command_id = 1;
+  oneof kind {
+    AbortExposure abort_exposure = 2;
+    CaptureNow capture_now = 3;
+  }
+}
+
+message AbortExposure {}
+
+message CaptureNow {}
+
+message CommandAck {
+  string command_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+// ---- Settings -----------------------------------------------------------------
+
+// Mirrors the current Mongo `settings` document. Unset fields mean "use the
+// device's own default".
+message DeviceSettings {
+  string device_id = 1;
+  optional double exposure_ms = 2;
+  optional int64 gain = 3;
+  optional double preview_gamma = 4;
+  optional double preview_contrast = 5;
+  optional double preview_brightness = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message UpdateDeviceSettingsRequest {
+  DeviceSettings settings = 1;
+}
+
+message UpdateDeviceSettingsResponse {
+  DeviceSettings settings = 1;
+  // True if the device was connected and the settings were pushed immediately.
+  // False is not a failure: the settings are stored, and the device receives
+  // them when it next connects.
+  bool delivered = 2;
+}
+
+message SendCommandRequest {
+  string device_id = 1;
+  Command command = 2;
+  // How long to wait for the device's CommandAck. Zero means don't wait.
+  uint32 ack_timeout_ms = 3;
+}
+
+message SendCommandResponse {
+  string command_id = 1;
+  bool acknowledged = 2;
+  string error = 3;
+}
+
+message ListConnectedDevicesRequest {}
+
+message ListConnectedDevicesResponse {
+  repeated ConnectedDevice devices = 1;
+}
+
+message ConnectedDevice {
+  string device_id = 1;
+  google.protobuf.Timestamp connected_at = 2;
+  google.protobuf.Timestamp last_message_at = 3;
+}
