@@ -88,6 +88,12 @@ says otherwise. Details in that component's README.
   (fpack/Rice), longer retention only for clear-sky frames (tag-filtered rules),
   a bigger volume or real object storage for prod. At 200 sites the ~7 TB/day
   is a storage-architecture decision, not a lifecycle setting.
+- **Clear-sky-only, compressed FITS retention — built 2026-10-02.** Raw FITS
+  still expire after 1 day; frames scored clear get a verified-lossless GZIP_2
+  copy (2.07–2.25× on the real camera's frames) under `archive/`, kept 7 days.
+  Disk for one camera ≈ 36 GB raw + (clear fraction × ~17 GB/day × 7). Sized
+  for about a third of frames clear; the real clear fraction is unknown until
+  there is real night data.
 - **`settings_audit` grows forever.**
 
 ## Tier 4 — read path at user scale
@@ -195,7 +201,7 @@ however many app replicas run.
 |---|---|---|---|
 | 1 | **Observability**: metrics (rate/latency/errors per RPC, pool use, queue depth, delivery success), tracing | 5 | Every item below is diagnosed with metrics, not guessed at. And the résumé claims OpenTelemetry. gRPC health is now done; metrics and tracing are not. |
 | 2 | **Finish the deploy**: seal `skycam-v2-secrets`, Traefik gRPC entryPoint (`readTimeout: 0`), Cloudflare gRPC toggle + device hostname | 0 | Everything in git is done. These three steps are outside it. |
-| 3 | ~~**S3 lifecycle rules**~~ **done 2026-10-01** | 3 | Remaining: decide FITS cadence/compression/clear-sky retention; at 200 sites ~7 TB/day needs a storage decision, not just expiry. |
+| 3 | ~~**S3 lifecycle rules**~~ **done 2026-10-01**; clear-sky compressed retention **done 2026-10-02** | 3 | Remaining: compress on the Pi (saves uplink, not just disk), measure the real clear fraction on real nights, then size `ARCHIVE_EXPIRE_DAYS`. At 200 sites, a storage decision. |
 | 4 | **Partition `frames` by month**, plus retention on `settings_audit`, `forecast_observations`, `alerts`, `notification_deliveries` | 3 | Retention becomes `DROP TABLE` instead of `DELETE` + VACUUM. |
 | 5 | **Sample + debounce cloud detection**: score ~1 frame per device per 30–60s, not every 2s preview; alarm only on agreement across samples | — | ~15–30× less detection work at 200 sites (~100 frames/s today), and fewer false alarms from planes or dew. See CLAUDE.md, *Detection cadence and transient events*. |
 | 5b | ~~PgBouncer~~ **built, opt-in** | 2 | Enable when combined app pools near `max_connections`. Dev is at ~40 of 100. |

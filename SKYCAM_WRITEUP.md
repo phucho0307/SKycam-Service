@@ -246,9 +246,41 @@ lives was the whole skill:
         returns 404.
    - **What lifecycle doesn't solve, stated plainly:** it stops unbounded
      growth, but 100 GiB still holds only about a day or two of FITS from one
-     camera. The real levers are the FITS cadence and size: FITS compression
-     (fpack with Rice, lossless for integer images), keeping FITS longer only for clear-sky frames,
-     and a bigger volume or real object storage for prod.
+     camera. So the next step (built 2026-10-02):
+   - **Keep FITS only for clear-sky frames, losslessly compressed.**
+     - **Default is delete.** Every raw FITS still expires after 1 day. Keeping
+       one is an explicit act: once detection scores a frame **clear**, the
+       worker writes a compressed copy under `archive/` (its own 7-day rule).
+       Cloudy, unscored and failed frames are never kept. If detection is down,
+       nothing is kept and nothing piles up, so the failure mode is safe for the
+       disk. The raw file's 1-day life doubles as a **grace period** for a wrong
+       verdict.
+     - **Measured on the camera's own FITS** before choosing a codec: GZIP_2
+       **2.07–2.25×** on unsaturated frames (~2 s CPU), Rice 1.66–1.70× (~0.4 s).
+       GZIP_2 won because only *kept* frames pay the CPU. Every result verified
+       lossless pixel for pixel.
+     - **The rule the code never breaks:** nothing is stored unless it
+       decompresses to exactly the original pixels and header. Not a FITS, float
+       data, extra HDUs, or no size gain → the original bytes are kept instead.
+       A clear frame is never lost to compression.
+     - **What testing caught:**
+       1. **All the real FITS in the dev bucket were taken in daylight or at
+          dusk**, many 70–98% saturated; **there is no real night data yet.**
+          Saturated frames compress unrealistically well (up to 28×), so the
+          numbers above use only the unsaturated ones, cross-checked against
+          synthetic night skies (GZIP_2 2.3–2.6×).
+       2. **Two "FITS" in the bucket were 1 MiB of random bytes** from old test
+          uploads. The archiver keeps such files raw rather than crashing.
+       3. **The safety check compared dtypes including byte order**, so it was
+          catching a lossy result for the wrong reason (`float32` vs `>f4`).
+          Found by disabling the float pre-check and seeing *why* the guard
+          fired; fixed so the pixel comparison is what decides, and now pinned
+          by a test.
+     - **Real-world caveats:** the detector is tuned on synthetic data and is
+       night-only (daytime reads cloudy, which conveniently means daytime FITS
+       are never kept). Cloudy frames aren't worthless for one purpose:
+       training a cloud model needs cloudy examples. The 7-day previews cover
+       labelling for now.
 
 **Interview takeaway:** I separated code failures from environment failures by
 reading each error, forming a hypothesis, testing it *cheaply* before committing to
