@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchFrames, fetchLatestFrame } from "@/lib/skycam";
+import { useLive } from "@/lib/useLive";
 import SettingsPanel from "./SettingsPanel";
 
 function timeAgo(iso: string): string {
@@ -11,22 +10,15 @@ function timeAgo(iso: string): string {
 }
 
 export default function LiveView() {
-  const { data: f, isLoading, error } = useQuery({
-    queryKey: ["skycam", "latest"],
-    queryFn: fetchLatestFrame,
-    refetchInterval: 3_000,
-  });
-  // Cloud status changes slowly; show the most recent *scored* frame so it's
-  // never blank while the newest frame is still waiting for detection.
-  const { data: recent } = useQuery({
-    queryKey: ["skycam", "recent-scored"],
-    queryFn: () => fetchFrames(20),
-    refetchInterval: 3_000,
-  });
-  const lastScored = recent?.find((fr) => fr.is_cloudy != null);
+  // One request (or one stream) carries both the newest frame and the newest
+  // *scored* frame. Cloud status lags the picture while detection runs, so the
+  // status shows the last scored frame and is never blank.
+  const { data, isLoading, error, mode } = useLive();
+  const f = data?.latest;
+  const lastScored = data?.last_scored;
 
   if (isLoading) return <Note>Loading latest frame…</Note>;
-  if (error) return <Note>Failed to load: {String((error as Error).message)}</Note>;
+  if (error && !data) return <Note>Failed to load: {String(error.message)}</Note>;
   if (!f) return <Note>No frames yet. Upload one to see it here.</Note>;
 
   return (
@@ -73,7 +65,10 @@ export default function LiveView() {
           </a>
         )}
         <p className="pt-1 text-xs text-slate-500">
-          Refreshes the newest preview every ~3s — adjust settings below and watch it change.
+          {mode === "sse"
+            ? "Live: new frames are pushed as they arrive"
+            : "Refreshes every ~2s"}{" "}
+          — adjust settings below and watch it change.
         </p>
         <SettingsPanel />
       </div>

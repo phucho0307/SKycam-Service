@@ -61,6 +61,29 @@ impl Storage {
         Ok(())
     }
 
+    /// Read a whole object over the internal endpoint. Only used for previews
+    /// (tens of KB), which are then served at a stable, CDN-cacheable path, so
+    /// each preview is read from S3 roughly once per CDN location rather than
+    /// once per viewer. Never use this for FITS.
+    ///
+    /// `Ok(None)` when the object does not exist. That is routine, not a fault:
+    /// the bucket's lifecycle rules delete previews after their retention
+    /// period while the frame's metadata (and so its URL) lives on.
+    pub async fn get_bytes(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await;
+        match resp {
+            Ok(obj) => Ok(Some(obj.body.collect().await?.into_bytes().to_vec())),
+            Err(e) if e.as_service_error().is_some_and(|se| se.is_no_such_key()) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// A short-lived, browser-reachable URL to GET an object (signed against
     /// the public endpoint).
     pub async fn presign_get(&self, key: &str, expires: Duration) -> Result<String> {

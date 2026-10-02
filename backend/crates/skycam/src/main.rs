@@ -8,7 +8,10 @@ mod storage;
 
 use config::Config;
 use db::Db;
+use std::sync::Arc;
+
 use rocket::data::{Limits, ToByteUnit};
+use routes::live::LiveHub;
 use storage::Storage;
 
 #[launch]
@@ -37,6 +40,7 @@ async fn rocket() -> _ {
 
     let mut app = rocket::custom(figment)
         .manage(db)
+        .manage(Arc::new(LiveHub::new()))
         .mount("/skycam", routes::all());
 
     match &cfg.s3 {

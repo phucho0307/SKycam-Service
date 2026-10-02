@@ -2,6 +2,21 @@
 
 Two modes — pick the one matching where the VPS lives.
 
+## Caching the skycam live view (needed from 2026-10-01)
+
+The skycam service sends `Cache-Control` headers designed for the edge to
+absorb viewer load. Measured: 2,000 polling viewers → ~47 origin requests in
+30 s with caching, against ~14,400 for 500 viewers without. Cloudflare caches
+by file extension by default:
+
+- `/skycam/frames/<id>/preview.jpg`: **cached automatically** (`.jpg`), for a
+  year (`immutable`).
+- `/skycam/live`: **not cached until you add a Cache Rule.** Rules → Cache
+  Rules → URI path starts with `/skycam/live` (and is not `/skycam/live/stream`)
+  → *Eligible for cache*, *Use cache-control header if present*. The origin sends
+  `max-age=2, stale-if-error=60`.
+- `/skycam/live/stream` (SSE, opt-in) must **not** be cached or buffered.
+
 ## gRPC needs extra setup (tested 2026-09-27)
 
 The Go ingest service (`services/ingest/`) speaks gRPC, and **Cloudflare blocks gRPC at the

@@ -47,6 +47,18 @@ fn specs() -> Vec<Spec> {
             serves: "GET /frames/latest, GET /frames",
         },
         Spec {
+            collection: "frames",
+            name: "frames_device_captured_at_desc",
+            model: IndexModel::builder()
+                .keys(doc! { "device_id": 1, "captured_at": -1 })
+                .options(named("frames_device_captured_at_desc").build())
+                .build(),
+            // GET /live?device_id= and the SSE stream: newest frame for one
+            // camera. Without the device prefix, a per-camera query on the
+            // captured_at index walks every other camera's newer frames first.
+            serves: "GET /live?device_id=, GET /live/stream",
+        },
+        Spec {
             collection: "telemetry",
             name: "telemetry_recorded_at_desc",
             model: IndexModel::builder()

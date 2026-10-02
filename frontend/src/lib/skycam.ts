@@ -11,7 +11,7 @@ export interface Frame {
   cloud_score?: number | null;
   is_cloudy?: boolean | null;
   size_bytes?: number | null;
-  preview_url?: string | null; // presigned, browser-reachable
+  preview_url?: string | null; // stable /skycam/frames/<id>/preview.jpg, cacheable
   fits_url?: string | null; // presigned download (only on full frames)
 }
 
@@ -33,6 +33,35 @@ async function getJSON<T>(path: string): Promise<T> {
 }
 
 export const fetchLatestFrame = () => getJSON<Frame | null>("/frames/latest");
+
+/** The newest frame (the picture) and the newest scored frame (sky status). */
+export interface LivePayload {
+  latest: Frame | null;
+  last_scored: Frame | null;
+}
+
+/** How the live view learns about new frames. See SCALING.md, "Live view". */
+export type LiveMode = "poll" | "sse";
+
+/**
+ * VITE_SKYCAM_LIVE picks the default; `?live=sse` or `?live=poll` in the page
+ * URL overrides it, so both can be compared side by side in one build.
+ */
+export function liveMode(): LiveMode {
+  const fromUrl = new URLSearchParams(window.location.search).get("live");
+  if (fromUrl === "sse" || fromUrl === "poll") return fromUrl;
+  return import.meta.env.VITE_SKYCAM_LIVE === "sse" ? "sse" : "poll";
+}
+
+const devQuery = (deviceId?: string) =>
+  deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+
+/** Option A: one cacheable request (Cache-Control: max-age=2). */
+export const fetchLive = (deviceId?: string) =>
+  getJSON<LivePayload>(`/live${devQuery(deviceId)}`);
+
+/** Option B: Server-Sent Events. The browser reconnects on its own. */
+export const liveStreamUrl = (deviceId?: string) => `${BASE}/live/stream${devQuery(deviceId)}`;
 export const fetchFrames = (limit = 60) => getJSON<Frame[]>(`/frames?limit=${limit}`);
 export const fetchTelemetry = (limit = 48) => getJSON<Reading[]>(`/telemetry?limit=${limit}`);
 

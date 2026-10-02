@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use rocket::form::Form;
 use rocket::fs::TempFile;
@@ -11,6 +13,7 @@ use domain::{Frame, TelemetryReading};
 
 use crate::config::Config;
 use crate::db::Db;
+use crate::routes::live::LiveHub;
 use crate::storage::Storage;
 
 /// Request guard: requires `Authorization: Bearer <INGEST_TOKEN>`.
@@ -34,7 +37,7 @@ impl<'r> FromRequest<'r> for Ingest {
             }
         };
         match req.headers().get_one("authorization") {
-            Some(h) if h.strip_prefix("Bearer ").map_or(false, |t| t == expected) => {
+            Some(h) if h.strip_prefix("Bearer ").is_some_and(|t| t == expected) => {
                 Outcome::Success(Ingest)
             }
             _ => Outcome::Error((Status::Unauthorized, ())),
@@ -144,6 +147,7 @@ pub async fn frames(
     _auth: Ingest,
     db: &State<Db>,
     storage: &State<Storage>,
+    hub: &State<Arc<LiveHub>>,
     mut upload: Form<FrameUpload<'_>>,
 ) -> Result<Json<Ack>, Status> {
     // A frame must carry at least a FITS or a preview.
@@ -199,8 +203,14 @@ pub async fn frames(
     let preview_key = if upload.preview.is_some() {
         let pkey = format!("previews/{}/{}-{}.jpg", device, ts, oid.to_hex());
         let part = upload.preview.as_mut().unwrap();
-        upload_part(storage, part, &pkey, "image/jpeg", &format!("preview-{}", oid.to_hex()))
-            .await?;
+        upload_part(
+            storage,
+            part,
+            &pkey,
+            "image/jpeg",
+            &format!("preview-{}", oid.to_hex()),
+        )
+        .await?;
         Some(pkey)
     } else {
         None
@@ -208,7 +218,7 @@ pub async fn frames(
 
     let frame = Frame {
         id: Some(oid),
-        device_id: device,
+        device_id: device.clone(),
         captured_at,
         received_at: now,
         s3_key,
@@ -231,6 +241,14 @@ pub async fn frames(
             tracing::error!(error = %e, "frame metadata insert failed");
             Status::InternalServerError
         })?;
+
+    // Tell open live streams. Off the request path, and a no-op with no viewers.
+    hub.publish_after_insert(
+        db.inner().clone(),
+        storage.inner().clone(),
+        device,
+        oid.to_hex(),
+    );
 
     Ok(Json(Ack {
         status: "stored",
