@@ -3,6 +3,12 @@
 #   observatory-dev, observatory-release, observatory-prod
 # Users (one per env, attached to a policy scoped to one bucket):
 #   <env>-user
+#
+# Lifecycle (retention) rules, added 2026-10-01. Without them the 100Gi volume
+# fills in under 3 days: one camera writes ~25MB of FITS a minute (~36GB/day).
+# Only frames/ and previews/ expire. releases/ (public downloads) and any other
+# prefix, e.g. a curated datasets/ for labelling, are never touched; verified
+# against a real MinIO. Retention is set by the three *_DAYS env vars below.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -26,6 +32,39 @@ data:
       sk="$(eval "echo \$${sk_var}")"
 
       mc mb --ignore-existing "local/${bucket}"
+
+      # One rule per prefix. AbortIncompleteMultipartUpload is for AWS S3,
+      # which otherwise keeps (and bills) abandoned upload parts forever. MinIO
+      # accepts it but silently drops it; on MinIO the server setting
+      # stale_uploads_expiry (set below) does that job instead.
+      cat >/tmp/lifecycle-${env}.json <<JSON
+    {
+      "Rules": [
+        {
+          "ID": "frames",
+          "Status": "Enabled",
+          "Filter": { "Prefix": "frames/" },
+          "Expiration": { "Days": ${FITS_EXPIRE_DAYS} },
+          "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": ${UPLOAD_RESUME_DAYS} }
+        },
+        {
+          "ID": "previews",
+          "Status": "Enabled",
+          "Filter": { "Prefix": "previews/" },
+          "Expiration": { "Days": ${PREVIEW_EXPIRE_DAYS} }
+        }
+      ]
+    }
+    JSON
+      # import replaces the whole configuration, so re-running is idempotent.
+      mc ilm import "local/${bucket}" < /tmp/lifecycle-${env}.json
+      # Verify what was stored, not what was sent: MinIO has already been seen
+      # accepting a lifecycle element and discarding it.
+      stored="$(mc ilm export "local/${bucket}")"
+      case "$stored" in
+        *'"ID":"frames"'*'"ID":"previews"'*|*'"ID":"previews"'*'"ID":"frames"'*) ;;
+        *) echo "lifecycle rules missing on ${bucket}: ${stored}" >&2; exit 1 ;;
+      esac
 
       cat >/tmp/policy-${env}.json <<JSON
     {
@@ -54,6 +93,11 @@ data:
       mc anonymous set download "local/${bucket}/releases" || true
     done
 
+    # How long a camera may stay away and still resume a half-uploaded FITS,
+    # MinIO's equivalent of AbortIncompleteMultipartUpload. Set explicitly so
+    # it matches the AWS rule above rather than relying on MinIO's default.
+    mc admin config set local api "stale_uploads_expiry=$((UPLOAD_RESUME_DAYS * 24))h"
+
     echo "bucket-init complete"
 ---
 apiVersion: batch/v1
@@ -70,6 +114,18 @@ spec:
           image: minio/mc:RELEASE.2025-07-21T05-28-08Z
           command: ["/bin/sh", "/scripts/init.sh"]
           env:
+            # Retention. Disk math (100Gi shared by all three envs, one camera):
+            # FITS ~36GB/day, so 1 day of FITS is ~36GB; MinIO may take up to a
+            # day more to process expiry, so budget ~2x. Previews are ~10KB
+            # (fake Pi; the real Pi's 1024px JPEGs are larger, not yet measured),
+            # 43,200 a day. Raise these only with a bigger volume.
+            - name: FITS_EXPIRE_DAYS
+              value: "1"
+            - name: PREVIEW_EXPIRE_DAYS
+              value: "7"
+            # A camera offline longer than this restarts its in-progress FITS.
+            - name: UPLOAD_RESUME_DAYS
+              value: "1"
             - name: ROOT_USER
               valueFrom:
                 secretKeyRef: { name: minio-root, key: user }
