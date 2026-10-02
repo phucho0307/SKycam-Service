@@ -205,6 +205,51 @@ lives was the whole skill:
    *outbound* connections, so isolation doesn't apply. Same reverse-tunnel trick as
    the production ingress, stood up on the laptop in one command.
 
+6. **Storage would have filled in under 3 days, and nothing would have warned me.**
+   *(Found and fixed 2026-10-01.)*
+   - **The problem:** one camera uploads a ~25 MB FITS every 60 s, about **36 GB a
+     day**. The MinIO volume is **100 GiB, shared by dev, release and prod**, and
+     nothing ever deleted anything. One camera fills it in under 3 days. Then
+     every upload fails, including the release proxy's public downloads in the
+     same bucket. At 200 sites the same gap is ~7 TB/day, which is the cost that
+     would end the project.
+   - **A hidden part:** the Go ingest service keeps multipart uploads open so a
+     camera can resume a 25 MB file after a dropped link. Its own code comment
+     said abandoned uploads "are cleaned up by the bucket's lifecycle rule". That
+     rule didn't exist. Abandoned parts don't show up as objects, but they use
+     disk and, on AWS, cost money forever.
+   - **The fix:** lifecycle rules in the MinIO bucket-init job, filtered by
+     prefix: `frames/` (FITS) expire after 1 day, `previews/` after 7, and
+     abandoned uploads after 1. `releases/` and any other prefix, such as a
+     future `datasets/` of labelled frames, are never touched. The numbers come
+     from the disk math (1 day of FITS ≈ 36 GB, budgeted ×2 for expiry lag) and
+     are three env vars, so they change without code.
+   - **What testing caught**, all against a real MinIO rather than assumed:
+     1. **MinIO rejects** a rule that only aborts uploads, but accepts it
+        combined with an expiration, and then **silently drops** the abort part.
+        Found by exporting what was stored, not trusting the success message. On
+        MinIO, a server setting (`stale_uploads_expiry`) does that job, so the
+        job now sets it explicitly to match the AWS rule. The rule stays in, for
+        AWS, which has no such default. The job now **verifies the stored rules
+        and fails loudly** if any are missing.
+     2. **Prefix filters work as intended:** a rule with an expiry date in the
+        past deleted `frames/` and `previews/` within seconds and left
+        `releases/`, `datasets/` and even `framesX/` alone (the trailing slash
+        matters).
+     3. **A camera survives its upload being aborted underneath it:** a new Go
+        test aborts a half-finished upload exactly as the rule would. The
+        service reports zero progress, starts a fresh upload, and the reassembled
+        file matches byte for byte.
+     4. **Expired images broke the read API:** the database still points at a
+        deleted preview, and the preview route returned **502 Bad Gateway** with
+        an ERROR log, so routine deletions would look like an outage. Now it
+        returns 404.
+   - **What lifecycle doesn't solve, stated plainly:** it stops unbounded
+     growth, but 100 GiB still holds only about a day or two of FITS from one
+     camera. The real levers are the FITS cadence and size: FITS compression
+     (fpack with Rice, lossless for integer images), keeping FITS longer only for clear-sky frames,
+     and a bigger volume or real object storage for prod.
+
 **Interview takeaway:** I separated code failures from environment failures by
 reading each error, forming a hypothesis, testing it *cheaply* before committing to
 a slow rebuild, and fixing one root cause at a time.

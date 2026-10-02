@@ -50,12 +50,24 @@ moved to Redis (see **Solved since this audit**). The dev manifests run
 Measured: **1,663 req/s at 8 pool connections, 2,271 at 32, no gain at 64** (p99
 got worse — queueing moves into Postgres).
 
-The standard next step is PgBouncer, and it collides with this design:
-**PgBouncer in transaction mode does not support `LISTEN/NOTIFY`**, which the
-detection trigger depends on. Already noted in
-`internal/testenv/testenv.go`. The fix is a **dedicated direct connection for the
-listener** that bypasses the pooler while everything else goes through it. Worth
-knowing before someone adds a pooler and silently kills the trigger.
+The standard next step is PgBouncer. **It is safe to add as the design stands.**
+Transaction pooling breaks `LISTEN` (a listener's connection is swapped out
+between transactions, so its notifications land on a connection now serving
+someone else, silently). But nothing listens: detection is triggered by polling,
+deliberately (see CLAUDE.md, Key architecture decision 3). `NOTIFY` itself
+works through the pooler.
+
+*Corrected 2026-10-01.* This section used to say the detection trigger
+"depends on" LISTEN/NOTIFY. It never did. If a listener is ever added, give it
+a dedicated direct connection that bypasses the pooler.
+
+**Built 2026-10-01, opt-in:** `infra/k8s/components/skycam-pgbouncer`, off
+everywhere. Against Postgres capped at 40 connections, an app pool of 120 went
+from **1,025 refused requests** (direct) to **0** through PgBouncer, which held
+25 server connections. Required setting: `MAX_PREPARED_STATEMENTS` (with it at
+0, 50 Go tests fail). Cost when not needed: ~15% throughput at an equal pool
+size. Dev uses ~40 of 100 connections today, so it stays off until the budget
+says otherwise. Details in that component's README.
 
 ## Tier 3 — data growth
 
@@ -63,18 +75,91 @@ knowing before someone adds a pooler and silently kills the trigger.
   `frames_device_captured_idx` grows unbounded and VACUUM cost with it. Partition
   by `captured_at` (monthly), because then **retention is `DROP TABLE`, not
   `DELETE`** — that is the real reason to do it.
-- **No S3 lifecycle rules.** 7.2 TB/day at 200 sites. This is the item that ends
-  the project financially rather than technically.
+- ~~**No S3 lifecycle rules.**~~ **Fixed 2026-10-01** (`infra/k8s/minio/bucket-init.yaml`).
+  Worse than this list said: the 100 GiB MinIO volume is shared by all three
+  environments, and one camera writes ~36 GB/day of FITS, so **one camera filled
+  it in under 3 days**. Now `frames/` expires after 1 day, `previews/` after 7,
+  abandoned multipart uploads after 1; `releases/` is untouched. Verified on a
+  real MinIO, including that **MinIO silently drops `AbortIncompleteMultipartUpload`**
+  (its `stale_uploads_expiry` setting does that job, now set explicitly), and
+  the job fails loudly if the stored rules don't match. Expired previews now
+  return 404 instead of 502. **Not solved by lifecycle:** 100 GiB still holds
+  only a day or two of FITS from one camera. Next levers: FITS compression
+  (fpack/Rice), longer retention only for clear-sky frames (tag-filtered rules),
+  a bigger volume or real object storage for prod. At 200 sites the ~7 TB/day
+  is a storage-architecture decision, not a lifecycle setting.
 - **`settings_audit` grows forever.**
 
 ## Tier 4 — read path at user scale
 
-- **`Cache-Control: max-age=2` on the latest-frame endpoint** turns 667 req/s
-  (2,000 browsers polling every 3s) into ~0.5 req/s at the origin.
-- **Presigned URLs are CDN-hostile.** The signature differs per request, so every
-  browser gets a unique URL and Cloudflare never serves a hit — ~160 Mbit/s of
-  preview egress that should be free. Previews are not secret: serve them at a
-  stable path with a long `max-age` and keep presigning for FITS.
+- ~~**`Cache-Control` on the latest-frame endpoint**~~ **Done 2026-10-01**, as a
+  new `GET /skycam/live` (latest frame + latest *scored* frame in one response,
+  replacing two polls) with `Cache-Control: public, max-age=2, stale-if-error=60`.
+- ~~**Presigned URLs are CDN-hostile.**~~ **Done 2026-10-01.** The signature
+  differed per request, so no cache could ever reuse a preview URL. Previews are
+  now served at `GET /skycam/frames/<id>/preview.jpg` with
+  `max-age=31536000, immutable`: a preview is written once and never changes.
+  FITS stays presigned. Measured: 18,051 image downloads by 2,000 viewers
+  reached the origin **11 times**.
+- **One Cloudflare setting is required, outside git:** Cloudflare caches by file
+  extension by default, so the `.jpg` previews are cached automatically, but the
+  extensionless `/skycam/live` JSON needs a **Cache Rule** marking it eligible
+  for cache. Without it the header does nothing at the edge. See
+  `infra/cloudflare/README.md`.
+
+### Live view: decided 2026-10-01, built and measured the same day
+
+The camera makes a new preview every **2 s**, so "live" is a 0.5 fps slideshow:
+the browser needs "a new frame exists, here is its URL", one way, server to
+browser. Two candidates, to be **measured against each other** before choosing:
+
+| | A. Polling + CDN cache | B. Server-Sent Events |
+|---|---|---|
+| Delay before a new frame shows | up to 2–3 s | ~instant |
+| Origin load at 2,000 viewers | ~0.5 req/s **per camera**, whatever the viewer count | 2,000 open connections; the CDN cannot absorb streams |
+| New parts | `Cache-Control: max-age=2` + stable preview URLs | Rust `EventStream` endpoint, Redis `frames:<device>` fan-out (one subscription per camera per pod), heartbeat every ~20 s (Cloudflare drops idle responses at ~100 s), latest-frame-on-connect so a lost pub/sub message heals |
+
+**Not WebSocket**: nothing flows browser → server continuously (settings are an
+occasional `PUT`), and SSE gives auto-reconnect with `Last-Event-ID` over plain
+HTTP. **Not HLS/WebRTC** unless real video (many fps) is ever wanted. Default
+plan: ship A (it is also this tier's first bullet), build B only if the
+measured delay is something viewers actually notice.
+
+**Measured (2026-10-01).** One camera publishing a ~11 KB preview every 2s; N
+simulated viewers behaving like the browser (poll every 2s, or hold a stream,
+and download each new preview). nginx stood in for the CDN edge: plain caching
+plus request collapsing (`proxy_cache_lock`). Counts are from its log. CPU is
+from the unoptimised debug build, so only the ratio between options means
+anything.
+
+| 2,000 viewers, 30 s | A. Polling + edge cache | B. SSE (+ cached previews) |
+|---|---|---|
+| Reaching the origin | **36 `/live` + 11 images**. Same at 500 viewers (31 + 10): flat in viewers | **2,000 open streams** + 21 images. Linear in viewers |
+| Origin CPU / memory | **2% / 33 MB** | 73% / 111 MB |
+| Frame stored → viewer sees it | p50 **2.3 s**, p95 3.8 s | p50 **0.14 s**, p95 0.21 s |
+| Frames seen per viewer (of ~15) | ~9: polling at the frame rate through a 2 s cache skips some | all |
+| Errors | 0 | 0 |
+
+Baseline, no edge cache, 500 viewers: **14,436 origin requests in 30 s** (7,495
+`/live` + 6,941 images) and ~320% CPU, versus 41 with the cache.
+
+**Origin restart mid-run (a deploy), 500 viewers.** Both were found wanting and
+fixed:
+- **Polling: 34 errors (502) → 0** after adding `stale-if-error=60`. The edge
+  serves the last good response while the origin is down.
+- **SSE: all 500 streams reconnected within 49 ms** (a thundering herd: 500
+  snapshot queries in one burst), because every EventSource uses the same
+  default delay. The server now sends a per-connection `retry:` spread over
+  1–5 s: the same 500 reconnects spread over **4.2 s**, **peak 26 per 100 ms
+  instead of 500**.
+
+**Decision: A, polling + CDN cache, is the default.** Origin cost stays flat
+however many people watch. The price is a 2–4 s delay and skipping some frames,
+and for a sky that changes over minutes, nobody can tell. SSE is built, tested
+and available behind a flag (`?live=sse` or `VITE_SKYCAM_LIVE=sse`) for a case
+where sub-second matters. **SSE limitation:** its fan-out hub is in-process, so
+with more than one skycam replica it needs a Redis channel per camera.
+Harness: `liveload` (Go) + nginx config. Run in the scratchpad, not committed.
 
 ## Tier 5 — the meta-blocker
 
@@ -110,10 +195,11 @@ however many app replicas run.
 |---|---|---|---|
 | 1 | **Observability**: metrics (rate/latency/errors per RPC, pool use, queue depth, delivery success), tracing | 5 | Every item below is diagnosed with metrics, not guessed at. And the résumé claims OpenTelemetry. gRPC health is now done; metrics and tracing are not. |
 | 2 | **Finish the deploy**: seal `skycam-v2-secrets`, Traefik gRPC entryPoint (`readTimeout: 0`), Cloudflare gRPC toggle + device hostname | 0 | Everything in git is done. These three steps are outside it. |
-| 3 | **S3 lifecycle rules** | 3 | ~7.2 TB/day at 200 sites. The one that ends the project financially. |
+| 3 | ~~**S3 lifecycle rules**~~ **done 2026-10-01** | 3 | Remaining: decide FITS cadence/compression/clear-sky retention; at 200 sites ~7 TB/day needs a storage decision, not just expiry. |
 | 4 | **Partition `frames` by month**, plus retention on `settings_audit`, `forecast_observations`, `alerts`, `notification_deliveries` | 3 | Retention becomes `DROP TABLE` instead of `DELETE` + VACUUM. |
-| 5 | **Dedicated LISTEN connection before any PgBouncer** | 2 | Transaction pooling silently kills `LISTEN/NOTIFY`. Measured ceiling: ~2.3k req/s at 32 conns. |
-| 6 | **Read path**: `Cache-Control: max-age=2` on latest-frame; previews at stable URLs, not presigned | 4 | 667 req/s → ~0.5 req/s at origin, and the CDN starts working. |
+| 5 | **Sample + debounce cloud detection**: score ~1 frame per device per 30–60s, not every 2s preview; alarm only on agreement across samples | — | ~15–30× less detection work at 200 sites (~100 frames/s today), and fewer false alarms from planes or dew. See CLAUDE.md, *Detection cadence and transient events*. |
+| 5b | ~~PgBouncer~~ **built, opt-in** | 2 | Enable when combined app pools near `max_connections`. Dev is at ~40 of 100. |
+| 6 | ~~**Read path**~~ **done 2026-10-01**: `/live` cacheable, previews at stable immutable URLs | 4 | Measured: origin load flat in viewer count. **Remaining: the Cloudflare Cache Rule for `/skycam/live`** (outside git). |
 | 7 | **Single points of failure**: Postgres replica or managed DB, Redis replica | — | Redis now carries control-plane state, not just the broker. |
 | 8 | **Decide the org / tenant model** (on paper) | 6 | Expensive to add later: it touches every authorization query. |
 | 9 | Smaller: BSON dates for Mongo timestamps; SES out of sandbox + bounce webhook; a canary email through the real mail path; auth on Rust `PUT /skycam/settings`; `ListConnectedDevices` reports zero timestamps for devices held by *another* replica | — | Real, but none compounds. |
