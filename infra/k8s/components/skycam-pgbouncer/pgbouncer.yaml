@@ -1,0 +1,104 @@
+# PgBouncer, transaction pooling. Many app connections share a few real ones.
+#
+# Two replicas, because a single pooler would be a new single point of failure
+# in front of every database call. Each replica holds its own server pool, so
+# the server-side total is replicas x DEFAULT_POOL_SIZE (here 2 x 20 = 40), and
+# that, plus anything that bypasses the pooler (migrations, psql), must fit
+# under Postgres max_connections (default 100). Measured lesson: PgBouncer's
+# idle server connections count against that limit too.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+spec:
+  selector:
+    app: pgbouncer
+  ports:
+    - name: postgres
+      port: 6432
+      targetPort: 6432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+    spec:
+      containers:
+        - name: pgbouncer
+          image: edoburu/pgbouncer:v1.26.0-p0
+          ports:
+            - containerPort: 6432
+          env:
+            - name: DB_HOST
+              value: postgres
+            - name: DB_USER
+              value: skycam
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: skycam-v2-secrets
+                  key: postgres_password
+            - name: AUTH_TYPE
+              value: scram-sha-256
+            # This image listens on 5432 unless told otherwise.
+            - name: LISTEN_PORT
+              value: "6432"
+            # Transaction pooling: a server connection is held only for the
+            # length of one transaction. Safe here because nothing uses
+            # session state: no LISTEN, no SET, no session advisory locks
+            # outside migrations (which bypass this).
+            - name: POOL_MODE
+              value: transaction
+            # REQUIRED. pgx and psycopg both use named prepared statements;
+            # with this at 0, 50 of the Go tests failed with
+            # 'prepared statement "stmtcache_..." already exists'.
+            - name: MAX_PREPARED_STATEMENTS
+              value: "200"
+            - name: MAX_CLIENT_CONN
+              value: "2000"
+            - name: DEFAULT_POOL_SIZE
+              value: "20"
+            # Hard ceiling per replica, whatever the per-user pools add up to.
+            - name: MAX_DB_CONNECTIONS
+              value: "25"
+            # A client that opens a transaction and goes quiet pins a server
+            # connection; release it rather than let one bug drain the pool.
+            - name: IDLE_TRANSACTION_TIMEOUT
+              value: "60"
+          readinessProbe:
+            tcpSocket:
+              port: 6432
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              memory: "128Mi"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pgbouncer
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pgbouncer

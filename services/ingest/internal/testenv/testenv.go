@@ -7,6 +7,13 @@
 //	INGEST_TEST_S3_ENDPOINT=http://localhost:9000
 //	INGEST_TEST_S3_ACCESS_KEY / INGEST_TEST_S3_SECRET_KEY   (default minioadmin)
 //	INGEST_TEST_S3_BUCKET                                   (default ingest-test)
+//	INGEST_TEST_DIRECT_DATABASE_URL  optional; see below
+//
+// To run the suite through PgBouncer, point INGEST_TEST_DATABASE_URL at the
+// pooler and INGEST_TEST_DIRECT_DATABASE_URL at Postgres itself. The two things
+// that need a real session -- migrations (golang-migrate holds a session-level
+// advisory lock) and LISTEN -- then use the direct URL, exactly as production
+// does. Unset, the direct URL defaults to INGEST_TEST_DATABASE_URL.
 package testenv
 
 import (
@@ -26,8 +33,10 @@ import (
 
 type Env struct {
 	DatabaseURL string
-	Pool        *pgxpool.Pool
-	Blobs       *blob.Store
+	// DirectURL bypasses any pooler. Used for migrations and LISTEN only.
+	DirectURL string
+	Pool      *pgxpool.Pool
+	Blobs     *blob.Store
 }
 
 // SetupDB migrates the test database and connects. Postgres only.
@@ -37,7 +46,8 @@ func SetupDB(t *testing.T) *Env {
 	if dbURL == "" {
 		t.Skip("set INGEST_TEST_DATABASE_URL to run Postgres integration tests")
 	}
-	if err := store.Migrate(dbURL); err != nil {
+	directURL := getenv("INGEST_TEST_DIRECT_DATABASE_URL", dbURL)
+	if err := store.Migrate(directURL); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	poolCfg, err := pgxpool.ParseConfig(dbURL)
@@ -59,7 +69,7 @@ func SetupDB(t *testing.T) *Env {
 		t.Fatalf("connect postgres: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return &Env{DatabaseURL: dbURL, Pool: pool}
+	return &Env{DatabaseURL: dbURL, DirectURL: directURL, Pool: pool}
 }
 
 // Setup is SetupDB plus S3, with the test bucket created if missing.
@@ -95,7 +105,7 @@ type Listener struct{ conn *pgx.Conn }
 
 func (e *Env) Listen(t *testing.T) *Listener {
 	t.Helper()
-	conn, err := pgx.Connect(context.Background(), e.DatabaseURL)
+	conn, err := pgx.Connect(context.Background(), e.DirectURL)
 	if err != nil {
 		t.Fatalf("listen connect: %v", err)
 	}

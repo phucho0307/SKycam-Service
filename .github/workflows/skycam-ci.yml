@@ -43,6 +43,19 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
+      # Same image and pooling settings as infra/k8s/components/skycam-pgbouncer.
+      pgbouncer:
+        image: edoburu/pgbouncer:v1.26.0-p0
+        env:
+          DB_HOST: postgres
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          AUTH_TYPE: scram-sha-256
+          LISTEN_PORT: "6432"
+          POOL_MODE: transaction
+          MAX_PREPARED_STATEMENTS: "200"
+          DEFAULT_POOL_SIZE: "20"
+        ports: ["6432:6432"]
     steps:
       - uses: actions/checkout@v4
 
@@ -91,6 +104,19 @@ jobs:
           INGEST_TEST_S3_ENDPOINT: http://localhost:9000
           INGEST_TEST_REDIS_URL: redis://localhost:6379/13
         run: go test -race -count=1 -p=1 -skip UnderLoad ./...
+
+      # The whole suite again, through PgBouncer in transaction mode. Pins the
+      # one setting that is easy to lose: with MAX_PREPARED_STATEMENTS at 0, 50
+      # tests fail with 'prepared statement "stmtcache_..." already exists'.
+      # Migrations and LISTEN use the direct URL, as in production.
+      - name: Go tests through PgBouncer (transaction pooling)
+        working-directory: services/ingest
+        env:
+          INGEST_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:6432/ingest_test?sslmode=disable
+          INGEST_TEST_DIRECT_DATABASE_URL: ${{ env.PG }}/ingest_test?sslmode=disable
+          INGEST_TEST_S3_ENDPOINT: http://localhost:9000
+          INGEST_TEST_REDIS_URL: redis://localhost:6379/13
+        run: go test -count=1 -p=1 -skip UnderLoad ./...
 
       - name: Go load tests (100 and 500 users)
         working-directory: services/ingest

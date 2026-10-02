@@ -1,0 +1,67 @@
+# Only DATABASE_URL changes: host postgres:5432 -> pgbouncer:6432.
+# Not patched: the ingest `migrate` init container (needs a real session for
+# golang-migrate's advisory lock) and Postgres itself.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest
+spec:
+  template:
+    spec:
+      containers:
+        - name: ingest
+          env:
+            - name: DATABASE_URL
+              value: postgres://skycam:$(POSTGRES_PASSWORD)@pgbouncer:6432/skycam?sslmode=disable
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detect-worker
+spec:
+  template:
+    spec:
+      containers:
+        - name: worker
+          env:
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@pgbouncer:6432/skycam
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detect-beat
+spec:
+  template:
+    spec:
+      containers:
+        - name: beat
+          env:
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@pgbouncer:6432/skycam
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notify-worker
+spec:
+  template:
+    spec:
+      containers:
+        - name: worker
+          env:
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@pgbouncer:6432/skycam
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notify-beat
+spec:
+  template:
+    spec:
+      containers:
+        - name: beat
+          env:
+            - name: DATABASE_URL
+              value: postgresql://skycam:$(POSTGRES_PASSWORD)@pgbouncer:6432/skycam

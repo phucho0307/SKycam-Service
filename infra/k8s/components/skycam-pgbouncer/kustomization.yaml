@@ -1,0 +1,22 @@
+# PgBouncer in front of the skycam-v2 Postgres. OPT-IN, and off everywhere for
+# now: enable it when the connection budget says so (see README.md), not before.
+# Measured: it costs ~15% throughput when connections were not the limit.
+#
+# To enable, list it AFTER skycam-v2 in an overlay, since it patches that
+# component's Deployments:
+#
+#   components:
+#   - ../../components/skycam-v2
+#   - ../../components/skycam-pgbouncer
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - pgbouncer.yaml
+
+# Re-point the apps' DATABASE_URL at the pooler. Strategic-merge patches match
+# containers and env vars by name, so only DATABASE_URL changes. The ingest
+# migrate init container is deliberately NOT patched: golang-migrate holds a
+# session-level advisory lock, which transaction pooling cannot keep.
+patches:
+  - path: point-apps-at-pgbouncer.yaml
