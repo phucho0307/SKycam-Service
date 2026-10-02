@@ -34,6 +34,14 @@ STALE_CLAIM_S = int(os.environ.get("DETECT_STALE_CLAIM_S", "300"))
 MAX_ATTEMPTS = int(os.environ.get("DETECT_MAX_ATTEMPTS", "3"))
 
 
+class ArchiveJob(NamedTuple):
+    frame_id: str
+    device_id: str
+    fits_key: str
+    fits_sha256: str  # hex, as recorded by ingest when the upload was verified
+    attempts: int
+
+
 class PendingFrame(NamedTuple):
     frame_id: str
     device_id: str
@@ -186,6 +194,108 @@ class PostgresStore:
                 (frame_id, device_id, kind, cloud_score),
             )
             return cur.rowcount == 1
+
+    # -- keeping clear-sky FITS (migration 0006_fits_archive) ---------------
+    def claim_archive(self, limit: int, window_s: int) -> list[ArchiveJob]:
+        """Claim clear-sky FITS to archive: retries first, then new candidates.
+
+        New candidates are frames scored clear, with a FITS, received within
+        `window_s` (older raw files may already have been expired by the bucket
+        lifecycle rule, so trying is pointless). They are claimed by INSERTing
+        their archive row: the primary key decides the winner, so two pollers
+        racing for one frame cannot both get it.
+
+        Retries are rows put back to 'pending' after a transient failure; they
+        are taken with SKIP LOCKED, as detection claims are.
+        """
+        sql = """
+        WITH retry AS (
+            UPDATE fits_archive a
+               SET status = 'claimed', claimed_at = now(), attempts = a.attempts + 1
+              FROM (SELECT frame_id FROM fits_archive
+                     WHERE status = 'pending'
+                     LIMIT %(limit)s
+                     FOR UPDATE SKIP LOCKED) p
+             WHERE a.frame_id = p.frame_id
+         RETURNING a.frame_id, a.attempts
+        ),
+        fresh AS (
+            INSERT INTO fits_archive (frame_id, status, attempts, claimed_at)
+            SELECT f.frame_id, 'claimed', 1, now()
+              FROM frames f
+             WHERE f.detect_status = 'scored'
+               AND f.is_cloudy = false
+               AND f.fits_key IS NOT NULL
+               AND f.received_at > now() - make_interval(secs => %(window)s)
+               AND NOT EXISTS (SELECT 1 FROM fits_archive a WHERE a.frame_id = f.frame_id)
+             ORDER BY f.received_at
+             LIMIT %(limit)s
+            ON CONFLICT (frame_id) DO NOTHING
+         RETURNING frame_id, attempts
+        )
+        SELECT f.frame_id::text, f.device_id, f.fits_key, encode(f.fits_sha256, 'hex'), x.attempts
+          FROM (SELECT * FROM retry UNION ALL SELECT * FROM fresh) x
+          JOIN frames f USING (frame_id)
+        """
+        with self.pool.connection() as conn:
+            rows = conn.execute(sql, {"limit": limit, "window": window_s}).fetchall()
+        return [ArchiveJob(*r) for r in rows]
+
+    def mark_archived(self, frame_id: str, key: str, compression: str, note: str | None,
+                      original_bytes: int, stored_bytes: int) -> None:
+        """Idempotent: a redelivered task re-uploads the same object to the same
+        key and lands here again; the first archived_at is kept."""
+        with self.pool.connection() as conn:
+            conn.execute(
+                """UPDATE fits_archive
+                      SET status = 'archived', archive_key = %s, compression = %s,
+                          error = %s, original_bytes = %s, stored_bytes = %s,
+                          archived_at = COALESCE(archived_at, now()), claimed_at = NULL
+                    WHERE frame_id = %s""",
+                (key, compression, note, original_bytes, stored_bytes, frame_id),
+            )
+
+    def archive_requeue(self, frame_id: str, error: str) -> None:
+        with self.pool.connection() as conn:
+            conn.execute(
+                """UPDATE fits_archive SET status = 'pending', error = %s, claimed_at = NULL
+                    WHERE frame_id = %s AND status <> 'archived'""",
+                (error[:500], frame_id),
+            )
+
+    def archive_failed(self, frame_id: str, error: str) -> None:
+        with self.pool.connection() as conn:
+            conn.execute(
+                """UPDATE fits_archive SET status = 'failed', error = %s, claimed_at = NULL
+                    WHERE frame_id = %s AND status <> 'archived'""",
+                (error[:500], frame_id),
+            )
+
+    def reclaim_stale_archive(self, older_than_s: int = STALE_CLAIM_S) -> int:
+        """Archive claims whose worker died: back to 'pending', or 'failed' once
+        the attempt budget is spent."""
+        sql = """
+        UPDATE fits_archive
+           SET status     = CASE WHEN attempts >= %s THEN 'failed' ELSE 'pending' END,
+               error      = CASE WHEN attempts >= %s
+                                 THEN 'abandoned: claimed but never completed' ELSE error END,
+               claimed_at = NULL
+         WHERE status = 'claimed'
+           AND claimed_at < now() - make_interval(secs => %s)
+        """
+        with self.pool.connection() as conn:
+            return conn.execute(sql, (MAX_ATTEMPTS, MAX_ATTEMPTS, older_than_s)).rowcount
+
+    def get_archive(self, frame_id: str) -> dict | None:
+        with self.pool.connection() as conn:
+            cur = conn.execute(
+                """SELECT status, attempts, error, archive_key, compression,
+                          original_bytes, stored_bytes, archived_at
+                     FROM fits_archive WHERE frame_id = %s""", (frame_id,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return dict(zip([d.name for d in cur.description], row))
 
     # -- read side (for tests and diagnostics) ------------------------------
     def get_status(self, frame_id: str) -> dict | None:

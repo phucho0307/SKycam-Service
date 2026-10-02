@@ -63,3 +63,10 @@ else:
             "schedule": SWEEP_INTERVAL_S,
         },
     }
+    # Keep FITS only for clear-sky frames, compressed. Off with
+    # DETECT_ARCHIVE_CLEAR_FITS=false, in which case every raw FITS just expires.
+    if os.environ.get("DETECT_ARCHIVE_CLEAR_FITS", "true").lower() == "true":
+        app.conf.beat_schedule["archive-clear-fits"] = {
+            "task": "tasks_pg.scan_archive",
+            "schedule": float(os.environ.get("DETECT_ARCHIVE_INTERVAL_S", "60")),
+        }

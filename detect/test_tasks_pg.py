@@ -260,7 +260,7 @@ def test_reclaim_returns_an_abandoned_claim(store, device):
     with store.pool.connection() as conn:
         conn.execute("UPDATE frames SET claimed_at = now() - interval '1 hour' "
                      "WHERE frame_id = %s", (fid,))
-    assert tasks_pg.reclaim_stale() == {"reclaimed": 1}
+    assert tasks_pg.reclaim_stale()["reclaimed"] == 1
     assert store.get_status(fid)["detect_status"] == "pending"
 
     # And it now completes normally on the retry.

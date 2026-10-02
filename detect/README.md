@@ -128,3 +128,27 @@ tried to process.
 
 `detect/Dockerfile`, a kustomize entry, and a Redis manifest — the worker runs in
 no cluster environment. Plus the `LISTEN` bridge, if the poll interval is to grow.
+
+## Keeping clear-sky FITS (Postgres backend)
+
+Raw FITS expire after a day (bucket lifecycle rule). Frames scored **clear** get a
+losslessly compressed copy under `archive/frames/<device>/<id>.fits.fz`, kept
+longer (`ARCHIVE_EXPIRE_DAYS` on the MinIO bucket-init job). Cloudy, unscored and
+failed frames are never kept.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `DETECT_ARCHIVE_CLEAR_FITS` | `true` | Schedule the archive scan at all |
+| `FITS_COMPRESSION` | `GZIP_2` | `GZIP_2`, `RICE_1`, or `none` |
+| `DETECT_ARCHIVE_INTERVAL_S` | `60` | How often Beat looks for clear frames to keep |
+| `DETECT_ARCHIVE_WINDOW_S` | `72000` (20 h) | Only frames this recent; must stay under the raw FITS lifetime |
+| `DETECT_ARCHIVE_LIMIT` | `10` | Frames per scan (each holds ~25 MB in memory while compressing) |
+
+`fits_archive.py` never stores anything that does not decompress to exactly the
+original pixels and header; if compression can't be proven lossless, the original
+bytes are archived instead. State per frame is in the `fits_archive` table
+(migration `0006_fits_archive`), including the reason a file was kept uncompressed.
+
+Read an archived file with any FITS reader (`astropy.io.fits.open`, DS9); the
+compressed image is in HDU 1. Measured on the camera's own frames: GZIP_2
+2.07–2.25×, Rice 1.66–1.70×.

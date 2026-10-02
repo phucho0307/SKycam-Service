@@ -6,7 +6,7 @@
 #
 # Lifecycle (retention) rules, added 2026-10-01. Without them the 100Gi volume
 # fills in under 3 days: one camera writes ~25MB of FITS a minute (~36GB/day).
-# Only frames/ and previews/ expire. releases/ (public downloads) and any other
+# frames/ (raw FITS), previews/ and archive/ (compressed clear-sky FITS) expire. releases/ (public downloads) and any other
 # prefix, e.g. a curated datasets/ for labelling, are never touched; verified
 # against a real MinIO. Retention is set by the three *_DAYS env vars below.
 apiVersion: v1
@@ -52,6 +52,12 @@ data:
           "Status": "Enabled",
           "Filter": { "Prefix": "previews/" },
           "Expiration": { "Days": ${PREVIEW_EXPIRE_DAYS} }
+        },
+        {
+          "ID": "archive",
+          "Status": "Enabled",
+          "Filter": { "Prefix": "archive/" },
+          "Expiration": { "Days": ${ARCHIVE_EXPIRE_DAYS} }
         }
       ]
     }
@@ -61,10 +67,12 @@ data:
       # Verify what was stored, not what was sent: MinIO has already been seen
       # accepting a lifecycle element and discarding it.
       stored="$(mc ilm export "local/${bucket}")"
-      case "$stored" in
-        *'"ID":"frames"'*'"ID":"previews"'*|*'"ID":"previews"'*'"ID":"frames"'*) ;;
-        *) echo "lifecycle rules missing on ${bucket}: ${stored}" >&2; exit 1 ;;
-      esac
+      for rule in frames previews archive; do
+        case "$stored" in
+          *"\"ID\":\"${rule}\""*) ;;
+          *) echo "lifecycle rule '${rule}' missing on ${bucket}: ${stored}" >&2; exit 1 ;;
+        esac
+      done
 
       cat >/tmp/policy-${env}.json <<JSON
     {
@@ -122,6 +130,12 @@ spec:
             - name: FITS_EXPIRE_DAYS
               value: "1"
             - name: PREVIEW_EXPIRE_DAYS
+              value: "7"
+            # Compressed FITS of clear-sky frames only (written by the detect
+            # worker; ~2.1x smaller than raw). Cloudy frames are never archived.
+            # One camera: (clear fraction) x ~17 GB/day x this. Unknown clear
+            # fraction, so sized for ~1/3 clear: 7 days is ~40 GB.
+            - name: ARCHIVE_EXPIRE_DAYS
               value: "7"
             # A camera offline longer than this restarts its in-progress FITS.
             - name: UPLOAD_RESUME_DAYS
